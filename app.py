@@ -1,11 +1,18 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 import streamlit as st
 import yfinance as yf
 import feedparser
 import requests
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def get_kst_now():
+    return datetime.now(KST)
 
 
 # =============================
@@ -33,7 +40,7 @@ if st.sidebar.button("메모 저장"):
     if memo.strip():
         with open("market_memo.txt", "a", encoding="utf-8") as f:
             f.write("\n---\n")
-            f.write(str(datetime.now()) + "\n")
+            f.write(get_kst_now().strftime("%Y-%m-%d %H:%M:%S KST") + "\n")
             f.write(memo + "\n")
         st.sidebar.success("메모가 저장되었습니다.")
     else:
@@ -70,8 +77,9 @@ st.title("🗺️ 투자 인사이트 맵")
 if st.button("🔄 데이터 새로고침"):
     st.rerun()
 
-st.caption(f"마지막 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.write(f"오늘 날짜: {datetime.now().strftime('%Y-%m-%d')}")
+now_kst = get_kst_now()
+st.caption(f"마지막 업데이트: {now_kst.strftime('%Y-%m-%d %H:%M:%S')} KST")
+st.write(f"오늘 날짜: {now_kst.strftime('%Y-%m-%d')}")
 
 st.divider()
 
