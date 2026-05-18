@@ -404,6 +404,33 @@ for query in naver_queries:
         news_data.append(news)
 
 
+# 고정 검색어만 보면 놓치는 흐름이 생길 수 있어, 오늘 감지된 키워드로 2차 확장 수집을 합니다.
+seed_counter = Counter()
+
+for news in news_data:
+    for term in news["terms"]:
+        if term in noise_words:
+            continue
+
+        seed_counter[term] += 1
+
+expansion_queries = [
+    term for term, count in seed_counter.most_common(8)
+    if term not in naver_queries
+]
+
+for query in expansion_queries:
+    for news in get_naver_news(query, display=8):
+        if news["title"] in seen_titles:
+            continue
+
+        if len(news["terms"]) < 2:
+            continue
+
+        seen_titles.add(news["title"])
+        news_data.append(news)
+
+
 # =============================
 # 뉴스 묶기
 # =============================
@@ -513,6 +540,109 @@ st.subheader("🔥 오늘 감지 키워드 TOP 7")
 
 for idx, (keyword, count) in enumerate(top_keywords, start=1):
     st.write(f"{idx}. {keyword}")
+
+if expansion_queries:
+    st.caption("2차 확장 검색어: " + ", ".join(expansion_queries))
+
+st.divider()
+
+
+# =========================
+# 관심 키워드 검색
+# =========================
+
+def matches_search_terms(text, query):
+    search_terms = [term.lower() for term in query.split() if term.strip()]
+    text = text.lower()
+
+    return all(term in text for term in search_terms)
+
+
+def issue_search_text(item):
+    issue_parts = [
+        item["issue"],
+        " ".join(item["keywords"]),
+        " ".join(item["watch_terms"]),
+        item["guide_text"],
+    ]
+
+    issue_parts.extend(news["title"] for news in item["items"])
+
+    return " ".join(issue_parts)
+
+
+def news_search_text(news):
+    return " ".join([
+        news["title"],
+        " ".join(news["terms"]),
+    ])
+
+
+st.subheader("🔎 관심 키워드 직접 검색")
+
+search_query = st.text_input(
+    "더 보고 싶은 키워드",
+    placeholder="예: 전력, 반도체, 환율, 로봇, 조선, 방산"
+).strip()
+
+if search_query:
+    matched_issues = [
+        item for item in issue_results
+        if matches_search_terms(issue_search_text(item), search_query)
+    ]
+
+    matched_news = []
+    seen_links = set()
+
+    for news in news_data:
+        if not matches_search_terms(news_search_text(news), search_query):
+            continue
+
+        if news["link"] in seen_links:
+            continue
+
+        seen_links.add(news["link"])
+        matched_news.append(news)
+
+    st.caption(
+        f"현재 수집 뉴스 기준: 이슈 묶음 {len(matched_issues)}개 / 개별 뉴스 {len(matched_news)}개"
+    )
+
+    if matched_issues:
+        st.markdown("#### 관련 이슈 묶음")
+
+        for item in matched_issues[:5]:
+            st.markdown(f"**{item['issue']}**")
+            st.caption(
+                f"묶인 뉴스: {item['cluster_size']}개 / 관심 집중도: {item['attention_score']}"
+            )
+
+            if item["keywords"]:
+                st.write("반복 키워드:", ", ".join(item["keywords"]))
+
+            st.info("연결 가이드: " + item["guide_text"])
+            st.markdown(f"- [대표 뉴스 보기]({item['representative']['link']})")
+
+            with st.expander("이 묶음의 뉴스 보기"):
+                for news in item["items"][:8]:
+                    st.markdown(f"- [{news['title']}]({news['link']})")
+
+    if matched_news:
+        st.markdown("#### 관련 개별 뉴스")
+
+        for news in matched_news[:10]:
+            st.markdown(f"- [{news['title']}]({news['link']})")
+
+    extra_news = get_naver_news(search_query, display=10)
+
+    if extra_news:
+        st.markdown("#### 네이버 추가 검색")
+
+        for news in extra_news[:10]:
+            st.markdown(f"- [{news['title']}]({news['link']})")
+
+    if not matched_issues and not matched_news and not extra_news:
+        st.warning("검색 결과가 없습니다. 다른 키워드로 다시 검색해 주세요.")
 
 st.divider()
 
