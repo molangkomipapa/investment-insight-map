@@ -170,6 +170,29 @@ important_short_terms = {
     "방산", "로봇", "바이오", "해운", "정유", "철강", "구리", "니켈",
 }
 
+market_signal_words = {
+    "경제", "증시", "주식", "주가", "코스피", "코스닥", "나스닥", "금리",
+    "환율", "달러", "원화", "유가", "원유", "물가", "인플레이션", "채권",
+    "국채", "수출", "수입", "무역", "관세", "공급망", "실적", "매출",
+    "영업이익", "수주", "계약", "투자", "증설", "공장", "생산", "반도체",
+    "배터리", "2차전지", "전기차", "자동차", "조선", "방산", "전력", "전선",
+    "원전", "로봇", "바이오", "제약", "철강", "화학", "정유", "해운",
+    "항공", "건설", "부동산", "은행", "보험", "증권", "ai", "hbm", "gpu",
+    "데이터센터", "엔비디아", "테슬라", "삼성전자", "sk하이닉스",
+}
+
+macro_context_words = {
+    "미국", "중국", "일본", "유럽", "중동", "이란", "러시아", "우크라이나",
+    "전쟁", "분쟁", "제재", "협상", "합의", "규제", "정책", "예산",
+}
+
+politics_social_noise_words = {
+    "대통령", "국회", "정당", "의원", "후보", "선거", "총선", "대선",
+    "여당", "야당", "검찰", "경찰", "재판", "법원", "구속", "기소",
+    "수사", "혐의", "사건", "사고", "화재", "살인", "폭행", "논란",
+    "사과", "입장", "비판", "시위", "집회", "교육", "학교", "학생",
+}
+
 
 def clean_title(title):
     title = re.sub("<.*?>", "", title)
@@ -226,6 +249,34 @@ def is_signal_term(term):
         return not re.search(r"(일보|기자|신문|방송|뉴스|닷컴)$", term)
 
     return len(lower) >= 3
+
+
+def get_market_relevance_score(title, terms):
+    text = (title + " " + " ".join(terms)).lower()
+    score = 0
+
+    for word in market_signal_words:
+        if word.lower() in text:
+            score += 2
+
+    for word in macro_context_words:
+        if word.lower() in text:
+            score += 1
+
+    for word in politics_social_noise_words:
+        if word in text:
+            score -= 1
+
+    return score
+
+
+def is_market_relevant_news(title, terms):
+    score = get_market_relevance_score(title, terms)
+
+    if score >= 2:
+        return True
+
+    return any(term in important_short_terms for term in terms)
 
 
 def extract_terms(title):
@@ -321,7 +372,7 @@ def get_article_nature_score(text):
 
     return score
 
-def get_naver_news(query="경제", display=20):
+def get_naver_news(query="경제", display=20, require_market=True):
     url = "https://openapi.naver.com/v1/search/news.json"
 
     try:
@@ -349,6 +400,9 @@ def get_naver_news(query="경제", display=20):
             terms = extract_terms(title)
 
             if len(terms) < 2:
+                continue
+
+            if require_market and not is_market_relevant_news(title, terms):
                 continue
 
             results.append({
@@ -452,6 +506,9 @@ for url in rss_urls:
             if len(terms) < 2:
                 continue
 
+            if not is_market_relevant_news(title, terms):
+                continue
+
             seen_titles.add(title)
 
             news_data.append({
@@ -467,7 +524,10 @@ for url in rss_urls:
         pass
 
 
-naver_queries = ["경제", "증시", "산업", "사회", "국제", "기업"]
+naver_queries = [
+    "경제", "증시", "주식", "산업", "기업", "국제경제",
+    "반도체", "전력", "방산", "조선", "환율", "금리"
+]
 
 for query in naver_queries:
     for news in get_naver_news(query, display=20):
@@ -716,7 +776,7 @@ if search_query:
         for news in matched_news[:10]:
             st.markdown(f"- [{news['title']}]({news['link']})")
 
-    extra_news = get_naver_news(search_query, display=10)
+    extra_news = get_naver_news(search_query, display=10, require_market=False)
 
     if extra_news:
         st.markdown("#### 네이버 추가 검색")
