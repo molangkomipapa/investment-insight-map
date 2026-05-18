@@ -7,8 +7,14 @@ import yfinance as yf
 import feedparser
 import requests
 
+try:
+    from kiwipiepy import Kiwi
+except ImportError:
+    Kiwi = None
+
 
 KST = timezone(timedelta(hours=9))
+kiwi = Kiwi() if Kiwi else None
 
 
 def get_kst_now():
@@ -140,6 +146,11 @@ noise_words = {
     "일부", "첫날", "하루", "사흘", "나흘", "오전", "오후", "당시",
     "최근", "관련해", "통해", "위해", "대해", "대상", "대비", "기준",
     "되나요", "되나", "되나?", "될까", "된다", "합니다", "했다", "한다",
+    "나선", "두고", "뒤에", "앞두고", "속에", "중인", "올해", "내년",
+    "작년", "전년", "개월", "분기", "상반기", "하반기", "업계", "관계자",
+    "이유", "사람", "우리", "여기", "저기", "어디", "누가", "무엇",
+    "공개", "확인", "논의", "추진", "검토", "요청", "방침", "예정",
+    "시작", "종료", "개최", "참석", "진행", "상황", "모습", "현장",
     "quot", "amp", "종합", "포토", "영상", "속보", "단독",
     "the", "and", "for", "with", "from", "that", "this", "are", "was",
     "were", "have", "will", "news", "says", "after", "about", "into",
@@ -150,7 +161,14 @@ noise_words = {
 noise_endings = (
     "되나요", "되나", "하나요", "했나요", "있나요", "없나요",
     "입니다", "합니다", "했다", "한다", "된다", "된다면",
+    "했다가", "하면서", "된다며", "라며", "지만", "는데", "거나",
 )
+
+important_short_terms = {
+    "ai", "2차전지", "ev", "ipo", "gpu", "hbm", "금리", "환율", "유가",
+    "증시", "코스피", "코스닥", "반도체", "전력", "전선", "원전", "조선",
+    "방산", "로봇", "바이오", "해운", "정유", "철강", "구리", "니켈",
+}
 
 
 def clean_title(title):
@@ -158,6 +176,17 @@ def clean_title(title):
     title = title.split(" - ")[0]
     title = title.replace("[속보]", "").replace("[단독]", "").replace("[종합]", "")
     return re.sub(r"\s+", " ", title).strip()
+
+
+def get_candidate_words(title):
+    if kiwi:
+        return [
+            token.form
+            for token in kiwi.tokenize(title)
+            if token.tag in {"NNG", "NNP", "SL"}
+        ]
+
+    return re.findall(r"[가-힣A-Za-z0-9]+", title)
 
 
 def is_noise_term(word):
@@ -172,11 +201,35 @@ def is_noise_term(word):
     if re.search(r"(첫날|일부|기준|대상|관련)$", word):
         return True
 
+    if re.search(r"(한다|했다|된다|였다|왔다|없다|있다|된다며|라며)$", word):
+        return True
+
     return False
 
 
+def is_signal_term(term):
+    lower = term.lower()
+
+    if is_noise_term(term):
+        return False
+
+    if lower in important_short_terms:
+        return True
+
+    if re.match(r"^[a-z]+$", lower):
+        return len(lower) >= 3
+
+    if re.match(r"^[가-힣]+$", term):
+        if len(term) < 3:
+            return False
+
+        return not re.search(r"(일보|기자|신문|방송|뉴스|닷컴)$", term)
+
+    return len(lower) >= 3
+
+
 def extract_terms(title):
-    words = re.findall(r"[가-힣A-Za-z0-9]+", title)
+    words = get_candidate_words(title)
     result = []
 
     for word in words:
@@ -194,7 +247,8 @@ def extract_terms(title):
         if sum(c.isdigit() for c in lower) / len(lower) >= 0.5:
             continue
 
-        result.append(lower)
+        if lower not in result:
+            result.append(lower)
 
     return result
 
@@ -432,14 +486,14 @@ seed_counter = Counter()
 
 for news in news_data:
     for term in news["terms"]:
-        if term in noise_words:
+        if not is_signal_term(term):
             continue
 
         seed_counter[term] += 1
 
 expansion_queries = [
     term for term, count in seed_counter.most_common(8)
-    if term not in naver_queries
+    if count >= 2 and term not in naver_queries
 ]
 
 for query in expansion_queries:
@@ -492,7 +546,10 @@ for cluster in clusters:
         all_terms.extend(item["terms"])
 
     term_counts = Counter(all_terms)
-    top_terms = [word for word, count in term_counts.most_common(5)]
+    top_terms = [
+        word for word, count in term_counts.most_common()
+        if is_signal_term(word)
+    ][:5]
 
     representative = cluster[0]
     issue_name = representative["title"]
@@ -548,21 +605,24 @@ for news in news_data:
         if len(term) < 2:
             continue
 
-        if term in noise_words:
+        if not is_signal_term(term):
             continue
 
         keyword_counter[term] = keyword_counter.get(term, 0) + 1
 
 top_keywords = sorted(
-    keyword_counter.items(),
-    key=lambda x: x[1],
+    [(keyword, count) for keyword, count in keyword_counter.items() if count >= 2],
+    key=lambda x: (x[1], len(x[0])),
     reverse=True
 )[:7]
 
 st.subheader("🔥 오늘 감지 키워드 TOP 7")
 
-for idx, (keyword, count) in enumerate(top_keywords, start=1):
-    st.write(f"{idx}. {keyword}")
+if top_keywords:
+    for idx, (keyword, count) in enumerate(top_keywords, start=1):
+        st.write(f"{idx}. {keyword}")
+else:
+    st.caption("아직 반복 감지된 핵심 키워드가 없습니다.")
 
 if expansion_queries:
     st.caption("2차 확장 검색어: " + ", ".join(expansion_queries))
