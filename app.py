@@ -137,6 +137,9 @@ noise_words = {
     "오늘", "관련", "뉴스", "기자", "단독", "속보", "이번", "지난",
     "최대", "최소", "전망", "가능성", "발표", "정부", "시장", "기업",
     "그대로", "만에", "까지", "부터", "에게", "에서", "으로", "하고",
+    "일부", "첫날", "하루", "사흘", "나흘", "오전", "오후", "당시",
+    "최근", "관련해", "통해", "위해", "대해", "대상", "대비", "기준",
+    "되나요", "되나", "되나?", "될까", "된다", "합니다", "했다", "한다",
     "quot", "amp", "종합", "포토", "영상", "속보", "단독",
     "the", "and", "for", "with", "from", "that", "this", "are", "was",
     "were", "have", "will", "news", "says", "after", "about", "into",
@@ -144,12 +147,32 @@ noise_words = {
     "they", "their", "them", "than", "when", "where", "what", "how",
 }
 
+noise_endings = (
+    "되나요", "되나", "하나요", "했나요", "있나요", "없나요",
+    "입니다", "합니다", "했다", "한다", "된다", "된다면",
+)
+
 
 def clean_title(title):
     title = re.sub("<.*?>", "", title)
     title = title.split(" - ")[0]
     title = title.replace("[속보]", "").replace("[단독]", "").replace("[종합]", "")
     return re.sub(r"\s+", " ", title).strip()
+
+
+def is_noise_term(word):
+    lower = word.lower()
+
+    if lower in noise_words or word in noise_words:
+        return True
+
+    if lower.endswith(noise_endings):
+        return True
+
+    if re.search(r"(첫날|일부|기준|대상|관련)$", word):
+        return True
+
+    return False
 
 
 def extract_terms(title):
@@ -162,7 +185,7 @@ def extract_terms(title):
         if len(lower) < 2:
             continue
 
-        if lower in noise_words or word in noise_words:
+        if is_noise_term(word):
             continue
 
         if re.match(r"^[a-z]+$", lower) and len(lower) < 4:
