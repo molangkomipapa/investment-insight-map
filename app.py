@@ -151,6 +151,11 @@ noise_words = {
     "이유", "사람", "우리", "여기", "저기", "어디", "누가", "무엇",
     "공개", "확인", "논의", "추진", "검토", "요청", "방침", "예정",
     "시작", "종료", "개최", "참석", "진행", "상황", "모습", "현장",
+    "사진", "자료", "지난해", "전날", "이날", "오는", "대한", "통한",
+    "위한", "두번째", "첫번째", "가능", "필요", "사용", "이용", "적용",
+    "제공", "확대", "강화", "운영", "선정", "지원", "관리", "개선",
+    "도입", "발생", "포함", "전체", "평균", "이상", "이하", "가운데",
+    "최고", "최저", "신규", "누적", "각종", "주요", "핵심", "대규모",
     "quot", "amp", "종합", "포토", "영상", "속보", "단독",
     "the", "and", "for", "with", "from", "that", "this", "are", "was",
     "were", "have", "will", "news", "says", "after", "about", "into",
@@ -191,6 +196,52 @@ politics_social_noise_words = {
     "여당", "야당", "검찰", "경찰", "재판", "법원", "구속", "기소",
     "수사", "혐의", "사건", "사고", "화재", "살인", "폭행", "논란",
     "사과", "입장", "비판", "시위", "집회", "교육", "학교", "학생",
+}
+
+theme_words = {
+    "반도체", "hbm", "gpu", "ai", "데이터센터", "전력", "전선", "원전",
+    "방산", "조선", "로봇", "바이오", "제약", "배터리", "2차전지",
+    "전기차", "자동차", "해운", "정유", "철강", "화학", "건설",
+    "은행", "보험", "증권", "원자재", "구리", "니켈", "우주", "항공",
+}
+
+risk_words = {
+    "급락", "하락", "위기", "충돌", "전쟁", "분쟁", "제재", "관세",
+    "규제", "고금리", "금리", "환율", "유가", "물가", "인플레이션",
+    "침체", "부도", "파산", "적자", "감산", "리콜", "중단", "차질",
+}
+
+theme_stock_map = {
+    "반도체": ["삼성전자", "SK하이닉스", "한미반도체", "DB하이텍"],
+    "hbm": ["SK하이닉스", "한미반도체", "이오테크닉스", "피에스케이홀딩스"],
+    "gpu": ["SK하이닉스", "삼성전자", "한미반도체"],
+    "ai": ["NAVER", "카카오", "삼성전자", "SK하이닉스"],
+    "데이터센터": ["삼성전자", "SK하이닉스", "LS ELECTRIC", "HD현대일렉트릭"],
+    "전력": ["HD현대일렉트릭", "LS ELECTRIC", "효성중공업", "일진전기"],
+    "전선": ["LS", "대한전선", "가온전선", "일진전기"],
+    "원전": ["두산에너빌리티", "현대건설", "한전기술", "비에이치아이"],
+    "방산": ["한화에어로스페이스", "LIG넥스원", "현대로템", "한국항공우주"],
+    "조선": ["HD한국조선해양", "HD현대중공업", "삼성중공업", "한화오션"],
+    "로봇": ["두산로보틱스", "레인보우로보틱스", "로보티즈", "에스피지"],
+    "바이오": ["삼성바이오로직스", "셀트리온", "유한양행", "한미약품"],
+    "제약": ["유한양행", "한미약품", "종근당", "녹십자"],
+    "배터리": ["LG에너지솔루션", "삼성SDI", "포스코퓨처엠", "에코프로비엠"],
+    "2차전지": ["LG에너지솔루션", "삼성SDI", "포스코퓨처엠", "에코프로비엠"],
+    "전기차": ["현대차", "기아", "LG에너지솔루션", "삼성SDI"],
+    "자동차": ["현대차", "기아", "현대모비스", "HL만도"],
+    "해운": ["HMM", "팬오션", "대한해운", "흥아해운"],
+    "정유": ["S-Oil", "SK이노베이션", "GS"],
+    "철강": ["POSCO홀딩스", "현대제철", "동국제강", "세아제강"],
+    "화학": ["LG화학", "롯데케미칼", "한화솔루션", "금호석유"],
+    "건설": ["현대건설", "삼성E&A", "대우건설", "DL이앤씨"],
+    "은행": ["KB금융", "신한지주", "하나금융지주", "우리금융지주"],
+    "보험": ["삼성생명", "삼성화재", "DB손해보험", "현대해상"],
+    "증권": ["미래에셋증권", "한국금융지주", "NH투자증권", "키움증권"],
+    "원자재": ["POSCO홀딩스", "고려아연", "풍산", "LS"],
+    "구리": ["풍산", "LS", "LS ELECTRIC", "가온전선"],
+    "니켈": ["POSCO홀딩스", "포스코퓨처엠", "LG화학"],
+    "우주": ["한국항공우주", "한화에어로스페이스", "쎄트렉아이"],
+    "항공": ["대한항공", "아시아나항공", "제주항공", "한국항공우주"],
 }
 
 
@@ -277,6 +328,72 @@ def is_market_relevant_news(title, terms):
         return True
 
     return any(term in important_short_terms for term in terms)
+
+
+def collect_issue_terms(item):
+    terms = []
+    terms.extend(item["keywords"])
+    terms.extend(item["watch_terms"])
+
+    for news in item["items"]:
+        terms.extend(news["terms"])
+
+    return terms
+
+
+def get_hot_themes(issue_results):
+    theme_counter = Counter()
+
+    for item in issue_results[:20]:
+        weight = max(1, item["cluster_size"])
+
+        for term in collect_issue_terms(item):
+            if term in theme_words:
+                theme_counter[term] += weight
+
+    return theme_counter.most_common(5)
+
+
+def get_related_stocks_from_terms(terms, limit=8):
+    stock_counter = Counter()
+
+    for term in terms:
+        if term not in theme_stock_map:
+            continue
+
+        for stock in theme_stock_map[term]:
+            stock_counter[stock] += 1
+
+    return [stock for stock, count in stock_counter.most_common(limit)]
+
+
+def get_issue_related_stocks(item, limit=6):
+    return get_related_stocks_from_terms(collect_issue_terms(item), limit=limit)
+
+
+def get_risk_alerts(issue_results):
+    alerts = []
+
+    for item in issue_results[:15]:
+        text = (
+            item["issue"] + " "
+            + " ".join(item["keywords"]) + " "
+            + " ".join(item["watch_terms"])
+        ).lower()
+        matched_risks = [
+            word for word in risk_words
+            if word.lower() in text
+        ]
+
+        if matched_risks:
+            alerts.append({
+                "issue": item["issue"],
+                "risks": list(dict.fromkeys(matched_risks))[:3],
+                "score": item["attention_score"],
+                "link": item["representative"]["link"],
+            })
+
+    return alerts[:3]
 
 
 def extract_terms(title):
@@ -676,6 +793,51 @@ top_keywords = sorted(
     reverse=True
 )[:7]
 
+
+# =========================
+# 시장 요약
+# =========================
+
+st.subheader("📌 시장 요약")
+
+summary_cols = st.columns(3)
+
+with summary_cols[0]:
+    st.markdown("**지금의 시장 핵심 3개**")
+
+    if issue_results:
+        for idx, item in enumerate(issue_results[:3], start=1):
+            st.write(f"{idx}. {item['issue']}")
+    else:
+        st.caption("아직 감지된 핵심 이슈가 없습니다.")
+
+with summary_cols[1]:
+    st.markdown("**돈이 도는 테마**")
+    hot_themes = get_hot_themes(issue_results)
+
+    if hot_themes:
+        for theme, count in hot_themes:
+            related_stocks = theme_stock_map.get(theme, [])[:3]
+
+            if related_stocks:
+                st.write(f"- {theme}: {', '.join(related_stocks)}")
+            else:
+                st.write(f"- {theme}")
+    else:
+        st.caption("아직 뚜렷한 테마 집중이 없습니다.")
+
+with summary_cols[2]:
+    st.markdown("**위험 상황 감지**")
+    risk_alerts = get_risk_alerts(issue_results)
+
+    if risk_alerts:
+        for alert in risk_alerts:
+            st.warning(f"{alert['issue']} / 위험 단어: {', '.join(alert['risks'])}")
+    else:
+        st.caption("뚜렷한 위험 신호는 아직 약합니다.")
+
+st.divider()
+
 st.subheader("🔥 오늘 감지 키워드 TOP 7")
 
 if top_keywords:
@@ -763,6 +925,11 @@ if search_query:
             if item["keywords"]:
                 st.write("반복 키워드:", ", ".join(item["keywords"]))
 
+            related_stocks = get_issue_related_stocks(item)
+
+            if related_stocks:
+                st.write("관련 종목 확인:", ", ".join(related_stocks))
+
             st.info("연결 가이드: " + item["guide_text"])
             st.markdown(f"- [대표 뉴스 보기]({item['representative']['link']})")
 
@@ -809,6 +976,11 @@ for item in issue_results[:10]:
 
     if item["keywords"]:
         st.write("반복 키워드:", ", ".join(item["keywords"]))
+
+    related_stocks = get_issue_related_stocks(item)
+
+    if related_stocks:
+        st.write("관련 종목 확인:", ", ".join(related_stocks))
 
     st.info("연결 가이드: " + item["guide_text"])
 
