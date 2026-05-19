@@ -6,6 +6,7 @@ import streamlit as st
 import yfinance as yf
 import feedparser
 import requests
+import pandas as pd
 
 try:
     from kiwipiepy import Kiwi
@@ -156,6 +157,9 @@ noise_words = {
     "제공", "확대", "강화", "운영", "선정", "지원", "관리", "개선",
     "도입", "발생", "포함", "전체", "평균", "이상", "이하", "가운데",
     "최고", "최저", "신규", "누적", "각종", "주요", "핵심", "대규모",
+    "기존", "다음", "결과", "분석", "전문가", "관측", "평가", "설명",
+    "계획", "전략", "방안", "방향", "부분", "내용", "이후", "이전",
+    "현재", "과거", "미래", "상태", "수준", "흐름", "전환", "확보",
     "quot", "amp", "종합", "포토", "영상", "속보", "단독",
     "the", "and", "for", "with", "from", "that", "this", "are", "was",
     "were", "have", "will", "news", "says", "after", "about", "into",
@@ -369,6 +373,109 @@ def get_related_stocks_from_terms(terms, limit=8):
 
 def get_issue_related_stocks(item, limit=6):
     return get_related_stocks_from_terms(collect_issue_terms(item), limit=limit)
+
+
+def get_issue_themes(item):
+    return [
+        term for term in dict.fromkeys(collect_issue_terms(item))
+        if term in theme_words
+    ]
+
+
+def get_theme_strength_label(score):
+    if score >= 80:
+        return "강한 흐름"
+
+    if score >= 60:
+        return "관심"
+
+    return "관찰"
+
+
+def get_theme_profiles(issue_results):
+    profiles = {}
+
+    for item in issue_results[:25]:
+        issue_themes = get_issue_themes(item)
+
+        if not issue_themes:
+            continue
+
+        text = (
+            item["issue"] + " "
+            + " ".join(item["keywords"]) + " "
+            + " ".join(item["watch_terms"])
+        ).lower()
+        risk_count = sum(1 for word in risk_words if word.lower() in text)
+
+        for theme in issue_themes:
+            profile = profiles.setdefault(theme, {
+                "theme": theme,
+                "issue_count": 0,
+                "news_count": 0,
+                "attention_total": 0,
+                "risk_count": 0,
+                "issues": [],
+            })
+
+            profile["issue_count"] += 1
+            profile["news_count"] += item["cluster_size"]
+            profile["attention_total"] += item["attention_score"]
+            profile["risk_count"] += risk_count
+            profile["issues"].append(item["issue"])
+
+    results = []
+
+    for profile in profiles.values():
+        score = round(
+            min(
+                100,
+                (profile["attention_total"] / 2)
+                + (profile["news_count"] * 2)
+                + (profile["issue_count"] * 8)
+                - (profile["risk_count"] * 3)
+            )
+        )
+
+        related_stocks = theme_stock_map.get(profile["theme"], [])[:4]
+
+        results.append({
+            "테마": profile["theme"],
+            "강도": score,
+            "판단": get_theme_strength_label(score),
+            "뉴스묶음": profile["issue_count"],
+            "뉴스수": profile["news_count"],
+            "위험": profile["risk_count"],
+            "관련종목": ", ".join(related_stocks),
+            "대표이슈": " / ".join(profile["issues"][:2]),
+        })
+
+    return sorted(results, key=lambda x: x["강도"], reverse=True)
+
+
+def get_stock_candidate_rows(theme_profiles, limit=10):
+    stock_counter = Counter()
+    stock_themes = {}
+
+    for profile in theme_profiles:
+        theme = profile["테마"]
+        score = profile["강도"]
+
+        for stock in theme_stock_map.get(theme, []):
+            stock_counter[stock] += score
+            stock_themes.setdefault(stock, []).append(theme)
+
+    rows = []
+
+    for stock, score in stock_counter.most_common(limit):
+        rows.append({
+            "종목": stock,
+            "연결테마": ", ".join(stock_themes[stock][:3]),
+            "뉴스연결점수": score,
+            "확인포인트": "수급·거래대금·차트 위치 확인",
+        })
+
+    return rows
 
 
 def get_risk_alerts(issue_results):
@@ -793,6 +900,9 @@ top_keywords = sorted(
     reverse=True
 )[:7]
 
+theme_profiles = get_theme_profiles(issue_results)
+stock_candidate_rows = get_stock_candidate_rows(theme_profiles)
+
 
 # =========================
 # 시장 요약
@@ -813,16 +923,18 @@ with summary_cols[0]:
 
 with summary_cols[1]:
     st.markdown("**돈이 도는 테마**")
-    hot_themes = get_hot_themes(issue_results)
 
-    if hot_themes:
-        for theme, count in hot_themes:
-            related_stocks = theme_stock_map.get(theme, [])[:3]
+    if theme_profiles:
+        for profile in theme_profiles[:5]:
+            related_stocks = theme_stock_map.get(profile["테마"], [])[:3]
 
             if related_stocks:
-                st.write(f"- {theme}: {', '.join(related_stocks)}")
+                st.write(
+                    f"- {profile['테마']} {profile['강도']}점: "
+                    + ", ".join(related_stocks)
+                )
             else:
-                st.write(f"- {theme}")
+                st.write(f"- {profile['테마']} {profile['강도']}점")
     else:
         st.caption("아직 뚜렷한 테마 집중이 없습니다.")
 
@@ -835,6 +947,37 @@ with summary_cols[2]:
             st.warning(f"{alert['issue']} / 위험 단어: {', '.join(alert['risks'])}")
     else:
         st.caption("뚜렷한 위험 신호는 아직 약합니다.")
+
+st.divider()
+
+st.subheader("📊 테마 강도판")
+
+if theme_profiles:
+    theme_table = pd.DataFrame(theme_profiles[:8])
+    st.dataframe(
+        theme_table[["테마", "강도", "판단", "뉴스묶음", "뉴스수", "위험", "관련종목"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    with st.expander("테마별 대표 이슈 보기"):
+        for profile in theme_profiles[:8]:
+            st.markdown(f"**{profile['테마']} {profile['강도']}점 / {profile['판단']}**")
+            st.caption(profile["대표이슈"])
+else:
+    st.caption("아직 점수화할 만큼 뚜렷한 테마가 없습니다.")
+
+st.subheader("🎯 관련 종목 후보 압축")
+
+if stock_candidate_rows:
+    st.dataframe(
+        pd.DataFrame(stock_candidate_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption("뉴스 연결점수는 매수 신호가 아니라, 어떤 종목을 먼저 확인할지 정렬하는 참고 점수입니다.")
+else:
+    st.caption("아직 관련 종목 후보를 만들 만큼 뚜렷한 테마가 없습니다.")
 
 st.divider()
 
