@@ -109,11 +109,39 @@ SITUATION_GUIDES = {
     "계곡": {
         "summary": "계곡은 수도권 근교, 강원 산간, 충청·전라·경상권까지 선택지가 넓어요. 거리, 물놀이 난이도, 캠핑 가능 여부로 좁히면 좋습니다.",
         "regions": ["가평", "포천", "양평", "홍천", "인제", "양양", "괴산", "제천", "무주", "지리산", "청도", "밀양"],
+        "spots": [
+            {"name": "용추계곡", "region": "가평", "location": "경기 가평군 가평읍", "note": "수도권 근교 물놀이와 펜션 여행에 좋아요."},
+            {"name": "백운계곡", "region": "포천", "location": "경기 포천시 이동면", "note": "물놀이, 백숙, 당일치기 조합이 편해요."},
+            {"name": "중원계곡", "region": "양평", "location": "경기 양평군 용문면", "note": "서울 근교 숲길과 계곡 산책을 같이 보기 좋아요."},
+            {"name": "수타사계곡", "region": "홍천", "location": "강원 홍천군 영귀미면", "note": "숲길, 계곡, 사찰 산책을 묶기 좋아요."},
+            {"name": "아침가리계곡", "region": "인제", "location": "강원 인제군 기린면", "note": "트레킹 성격이 강해서 준비가 필요한 계곡이에요."},
+            {"name": "미천골계곡", "region": "양양", "location": "강원 양양군 서면", "note": "자연휴양림, 숲, 조용한 물놀이에 어울려요."},
+            {"name": "쌍곡계곡", "region": "괴산", "location": "충북 괴산군 칠성면", "note": "충청권 대표 계곡으로 가족 물놀이 후보예요."},
+            {"name": "송계계곡", "region": "제천", "location": "충북 제천시 한수면", "note": "월악산 주변 드라이브와 같이 보기 좋아요."},
+            {"name": "구천동계곡", "region": "무주", "location": "전북 무주군 설천면", "note": "긴 계곡길과 덕유산 여행을 묶기 좋아요."},
+            {"name": "뱀사골계곡", "region": "남원", "location": "전북 남원시 산내면", "note": "지리산권 깊은 계곡 여행지예요."},
+            {"name": "운문사계곡", "region": "청도", "location": "경북 청도군 운문면", "note": "대구 근교 계곡과 사찰 산책 조합이 좋아요."},
+            {"name": "호박소계곡", "region": "밀양", "location": "경남 밀양시 산내면", "note": "영남권에서 물색과 바위 풍경으로 많이 찾는 곳이에요."},
+        ],
         "searches": ["계곡 캠핑장", "계곡 백숙 맛집", "계곡 근처 저렴한 숙소", "아이와 가기 좋은 계곡"],
     },
     "바다": {
         "summary": "조용한 해변, 도시 바다, 섬 여행처럼 원하는 분위기에 따라 지역을 고르면 좋아요.",
         "regions": ["강릉", "속초", "동해", "양양", "고성", "태안", "보령", "군산", "부산", "여수", "남해", "제주"],
+        "spots": [
+            {"name": "경포해변", "region": "강릉", "location": "강원 강릉시 안현동", "note": "접근성, 숙소, 카페 선택지가 많아요."},
+            {"name": "속초해수욕장", "region": "속초", "location": "강원 속초시 조양동", "note": "시장 먹거리와 설악산 일정을 같이 잡기 좋아요."},
+            {"name": "망상해변", "region": "동해", "location": "강원 동해시 망상동", "note": "캠핑장과 넓은 백사장이 강점이에요."},
+            {"name": "낙산해변", "region": "양양", "location": "강원 양양군 강현면", "note": "서핑, 카페, 낙산사 코스를 묶기 좋아요."},
+            {"name": "송지호해변", "region": "고성", "location": "강원 고성군 죽왕면", "note": "조용한 동해 바다와 캠핑 후보로 좋아요."},
+            {"name": "만리포해수욕장", "region": "태안", "location": "충남 태안군 소원면", "note": "서해 일몰과 가족 여행으로 많이 찾는 곳이에요."},
+            {"name": "대천해수욕장", "region": "보령", "location": "충남 보령시 신흑동", "note": "숙소와 먹거리 인프라가 많은 서해 대표 해변이에요."},
+            {"name": "선유도해수욕장", "region": "군산", "location": "전북 군산시 옥도면", "note": "섬 드라이브와 해변 산책을 같이 즐기기 좋아요."},
+            {"name": "광안리해수욕장", "region": "부산", "location": "부산 수영구 광안해변로", "note": "도시 바다, 야경, 맛집이 강해요."},
+            {"name": "만성리검은모래해변", "region": "여수", "location": "전남 여수시 만흥동", "note": "여수 먹거리와 밤바다 일정에 붙이기 좋아요."},
+            {"name": "상주은모래비치", "region": "남해", "location": "경남 남해군 상주면", "note": "남해 드라이브와 조용한 휴식에 어울려요."},
+            {"name": "협재해변", "region": "제주", "location": "제주시 한림읍 협재리", "note": "맑은 물색, 카페, 서쪽 제주 코스에 좋아요."},
+        ],
         "searches": ["오션뷰 카페", "바다 근처 가성비 숙소", "해산물 맛집", "해변 산책 코스"],
     },
     "캠핑": {
@@ -565,23 +593,48 @@ def render_region(guide):
         )
 
 
+def render_situation_spots(key, spots):
+    st.markdown(f"**추천 {key} 12곳**")
+    spot_cols = st.columns(3)
+
+    for index, spot in enumerate(spots):
+        with spot_cols[index % 3]:
+            with st.container(border=True):
+                st.markdown(f"**{index + 1}. {spot['name']}**")
+                st.caption(f"{spot['region']} · {spot['location']}")
+                st.write(spot["note"])
+                st.link_button(
+                    "지도 보기",
+                    search_url(spot["name"], "naver_map"),
+                    width="stretch",
+                )
+                st.link_button(
+                    "먹거리·숙소 같이 검색",
+                    search_url(f"{spot['name']} 맛집 숙소 카페", "naver"),
+                    width="stretch",
+                )
+
+
 def render_situation(query, situations):
     st.markdown("### 상황으로 찾기")
-    st.caption("지역 이름이 아니라 계곡, 바다, 캠핑처럼 가고 싶은 장면을 입력한 경우예요. 먼저 여러 지역 후보를 보여주고, 마음에 드는 지역명으로 다시 검색하면 세부 후보가 나옵니다.")
+    st.caption("지역 이름이 아니라 계곡, 바다, 캠핑처럼 가고 싶은 장면을 입력한 경우예요. 계곡명·해변명처럼 실제 목적지를 먼저 보여주고, 지역은 보조 정보로 붙입니다.")
 
     for key, guide in situations:
         with st.container(border=True):
             st.markdown(f"#### {key}")
             st.write(guide["summary"])
-            render_chip_row(guide["regions"])
 
-            st.markdown("**추천 지역**")
-            region_cols = st.columns(4)
-            for index, region in enumerate(guide["regions"]):
-                with region_cols[index % 4]:
-                    st.markdown(f"**{region}**")
-                    st.caption(f"{key} 여행 후보")
-                    st.link_button(f"{region} 지도 확인", search_url(f"{region} {query}", "naver_map"), width="stretch")
+            if guide.get("spots"):
+                render_situation_spots(key, guide["spots"])
+
+            with st.expander("관련 지역 후보 보기"):
+                render_chip_row(guide["regions"])
+                region_cols = st.columns(4)
+                for index, region in enumerate(guide["regions"]):
+                    with region_cols[index % 4]:
+                        st.markdown(f"**{region}**")
+                        st.caption(f"{key} 여행 후보")
+                        st.link_button(f"{region} 지도 확인", search_url(f"{region} {query}", "naver_map"), width="stretch")
 
             st.markdown("**바로 써먹는 검색어**")
             for search in guide["searches"]:
