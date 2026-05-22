@@ -286,7 +286,7 @@ def load_social_candidates():
         return pd.DataFrame()
 
 
-def get_real_candidates(region_name, category, limit=10):
+def get_real_candidates(region_name, category, limit=50):
     data = load_social_candidates()
     if data.empty:
         return []
@@ -345,7 +345,7 @@ def make_candidate_name(region_name, source, category, index):
     return f"{region_name} {source} {suffix}"
 
 
-def build_ranked_candidates(guide, category, limit=10):
+def build_ranked_candidates(guide, category, limit=50):
     real_candidates = get_real_candidates(guide["title"], category, limit=limit)
     if real_candidates:
         return real_candidates
@@ -371,7 +371,7 @@ def build_ranked_candidates(guide, category, limit=10):
 
 
 @st.cache_data(ttl=60 * 30)
-def collect_live_candidates(region_name, category, limit=10):
+def collect_live_candidates(region_name, category, limit=50):
     if not local_candidates or not count_mentions or not score_candidate:
         return []
 
@@ -450,12 +450,22 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
     st.caption(caption)
 
     candidates = build_ranked_candidates(guide, category)
+    display_limit = st.slider(
+        "표시할 후보 수",
+        min_value=10,
+        max_value=min(50, max(10, len(candidates))),
+        value=min(10, len(candidates)),
+        step=10,
+        key=f"{guide['title']}_{category}_limit",
+    )
     if candidates and candidates[0].get("source") == "임시 랭킹":
         st.caption("아직 수집 CSV가 없어 임시 랭킹을 보여줍니다. 수집 스크립트를 실행하면 실제 데이터로 바뀝니다.")
     else:
         st.caption("수집된 블로그·카페·소셜 반응 데이터를 합산해 정렬했습니다.")
 
-    for display_rank, candidate in enumerate(candidates, start=1):
+    st.caption(f"총 {len(candidates)}개 후보 중 상위 {display_limit}개를 보여줍니다.")
+
+    for display_rank, candidate in enumerate(candidates[:display_limit], start=1):
         candidate["rank"] = display_rank
         render_candidate_card(candidate, include_stay=include_stay)
 
@@ -489,14 +499,23 @@ def render_live_region(region_name):
 
     for tab, category in zip(section_tabs, categories):
         with tab:
-            st.markdown(f"#### {CATEGORY_LABELS[category]} 후보 10")
+            st.markdown(f"#### {CATEGORY_LABELS[category]} 후보")
             st.caption(CATEGORY_CAPTIONS[category])
             with st.spinner(f"{region_name} {CATEGORY_LABELS[category]} 후보를 수집하는 중입니다."):
                 candidates = collect_live_candidates(region_name, category)
 
             if candidates:
+                display_limit = st.slider(
+                    "표시할 후보 수",
+                    min_value=10,
+                    max_value=min(50, max(10, len(candidates))),
+                    value=min(10, len(candidates)),
+                    step=10,
+                    key=f"live_{region_name}_{category}_limit",
+                )
                 st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
-                for candidate in candidates:
+                st.caption(f"총 {len(candidates)}개 후보 중 상위 {display_limit}개를 보여줍니다.")
+                for candidate in candidates[:display_limit]:
                     render_candidate_card(
                         candidate,
                         include_stay=category == "affordable_stays",

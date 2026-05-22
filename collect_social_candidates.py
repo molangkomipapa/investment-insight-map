@@ -124,7 +124,7 @@ def count_mentions(endpoint, query):
         return 0
 
 
-def naver_local_candidates(region, category, limit_per_query=5):
+def naver_local_candidates(region, category, limit_per_query=10):
     seen = set()
     results = []
 
