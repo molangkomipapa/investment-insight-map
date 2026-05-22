@@ -445,19 +445,26 @@ def render_candidate_card(candidate, include_stay=False):
             link_row(candidate["query"], include_stay=include_stay)
 
 
+def candidate_display_limit(candidates, key):
+    if len(candidates) <= 10:
+        return len(candidates)
+
+    return st.slider(
+        "표시할 후보 수",
+        min_value=10,
+        max_value=min(50, len(candidates)),
+        value=10,
+        step=10,
+        key=key,
+    )
+
+
 def render_ranked_section(guide, category, title, caption, include_stay=False):
     st.markdown(f"#### {title}")
     st.caption(caption)
 
     candidates = build_ranked_candidates(guide, category)
-    display_limit = st.slider(
-        "표시할 후보 수",
-        min_value=10,
-        max_value=min(50, max(10, len(candidates))),
-        value=min(10, len(candidates)),
-        step=10,
-        key=f"{guide['title']}_{category}_limit",
-    )
+    display_limit = candidate_display_limit(candidates, f"{guide['title']}_{category}_limit")
     if candidates and candidates[0].get("source") == "임시 랭킹":
         st.caption("아직 수집 CSV가 없어 임시 랭킹을 보여줍니다. 수집 스크립트를 실행하면 실제 데이터로 바뀝니다.")
     else:
@@ -505,13 +512,9 @@ def render_live_region(region_name):
                 candidates = collect_live_candidates(region_name, category)
 
             if candidates:
-                display_limit = st.slider(
-                    "표시할 후보 수",
-                    min_value=10,
-                    max_value=min(50, max(10, len(candidates))),
-                    value=min(10, len(candidates)),
-                    step=10,
-                    key=f"live_{region_name}_{category}_limit",
+                display_limit = candidate_display_limit(
+                    candidates,
+                    f"live_{region_name}_{category}_limit",
                 )
                 st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
                 st.caption(f"총 {len(candidates)}개 후보 중 상위 {display_limit}개를 보여줍니다.")
