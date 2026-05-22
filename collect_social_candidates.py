@@ -18,11 +18,27 @@ OUTPUT_FILE = Path("data/social_candidates.csv")
 STREAMLIT_SECRETS_FILE = Path(".streamlit/secrets.toml")
 
 CATEGORY_QUERIES = {
-    "foods": ["맛집", "현지인 맛집", "시장 먹거리", "웨이팅 적은 맛집"],
-    "affordable_stays": ["저렴한 숙소", "가성비 숙소", "비즈니스호텔", "게스트하우스"],
-    "camping": ["캠핑장", "오토캠핑장", "카라반", "야영장"],
-    "places": ["가볼만한곳", "명소", "즐길거리", "산책 코스"],
-    "desserts": ["카페", "빵집", "디저트", "베이커리"],
+    "foods": [
+        "맛집", "현지인 맛집", "로컬 맛집", "한식", "백반", "국밥",
+        "막국수", "칼국수", "고기", "해산물", "시장 먹거리", "혼밥",
+        "가성비 맛집", "웨이팅 적은 맛집", "아이와 식당",
+    ],
+    "affordable_stays": [
+        "저렴한 숙소", "가성비 숙소", "숙박", "모텔", "호텔", "비즈니스호텔",
+        "펜션", "민박", "게스트하우스", "한옥스테이", "가족 숙소", "주차 숙소",
+    ],
+    "camping": [
+        "캠핑장", "오토캠핑장", "야영장", "카라반", "글램핑", "차박",
+        "캠크닉", "계곡 캠핑", "해변 캠핑", "숲 캠핑", "가족 캠핑",
+    ],
+    "places": [
+        "가볼만한곳", "명소", "관광지", "즐길거리", "산책 코스", "드라이브",
+        "전망대", "공원", "박물관", "미술관", "시장", "체험", "아이와 가볼만한곳",
+    ],
+    "desserts": [
+        "카페", "빵집", "디저트", "베이커리", "커피", "로스터리",
+        "대형카페", "뷰카페", "감성카페", "전통찻집", "브런치카페",
+    ],
 }
 
 TOUR_CONTENT_TYPES = {
@@ -124,7 +140,7 @@ def count_mentions(endpoint, query):
         return 0
 
 
-def naver_local_candidates(region, category, limit_per_query=10):
+def naver_local_candidates(region, category, limit_per_query=20):
     seen = set()
     results = []
 
@@ -155,7 +171,7 @@ def naver_local_candidates(region, category, limit_per_query=10):
     return results
 
 
-def kakao_local_candidates(region, category, limit_per_query=10):
+def kakao_local_candidates(region, category, limit_per_query=15):
     headers = kakao_headers()
     if not headers:
         return []
@@ -197,7 +213,7 @@ def kakao_local_candidates(region, category, limit_per_query=10):
     return results
 
 
-def tour_api_candidates(region, category, limit_per_query=10):
+def tour_api_candidates(region, category, limit_per_query=20):
     service_keys = tour_api_service_keys()
     if not service_keys:
         return []
