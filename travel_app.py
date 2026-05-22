@@ -437,28 +437,29 @@ def render_candidate_card(candidate, include_stay=False):
                 f"출처 {candidate.get('source_count', 1)}개"
             )
         with header_cols[1]:
-            st.metric("반응 점수", f"{metrics['score']}점")
+            st.metric("노출", f"{get_exposure(candidate):,}")
 
-        st.progress(metrics["score"] / 100)
+        exposure = get_exposure(candidate)
+        exposure_ratio = min(1.0, exposure / 1000) if exposure else 0
+        st.progress(exposure_ratio)
 
         with st.expander("검증 링크 열기"):
             link_row(candidate["query"], include_stay=include_stay)
 
 
-def get_score(candidate):
-    return candidate.get("metrics", {}).get("score", 0)
+def get_exposure(candidate):
+    metrics = candidate.get("metrics", {})
+    return (
+        metrics.get("blog", 0)
+        + metrics.get("cafe", 0)
+        + metrics.get("instagram", 0)
+        + metrics.get("facebook", 0)
+    )
 
 
-def prepare_candidate_view(candidates, minimum_score=70, max_candidates=50):
-    qualified = [
-        candidate for candidate in candidates
-        if get_score(candidate) >= minimum_score
-    ]
-
-    if qualified:
-        return qualified[:max_candidates], f"반응 점수 {minimum_score}점 이상", minimum_score
-
-    return candidates[:max_candidates], "수집된", None
+def prepare_candidate_view(candidates, max_candidates=50):
+    sorted_candidates = sorted(candidates, key=get_exposure, reverse=True)
+    return sorted_candidates[:max_candidates]
 
 
 def candidate_page(candidates, key, page_size=10):
@@ -499,14 +500,10 @@ def candidate_page(candidates, key, page_size=10):
     return current_page, start, end
 
 
-def render_candidate_list(candidates, label, key, include_stay=False, minimum_score=None):
-    if minimum_score:
-        st.success(f"반응 점수 {minimum_score}점 이상 후보가 {len(candidates)}개 검색되었습니다.")
-    else:
-        st.info(f"70점 이상 후보가 부족해 수집된 후보 {len(candidates)}개를 보여줍니다.")
-
+def render_candidate_list(candidates, key, include_stay=False):
+    st.success(f"노출이 많은 후보 {len(candidates)}개를 찾았습니다.")
     page, start, end = candidate_page(candidates, key)
-    st.caption(f"{label} 후보 {len(candidates)}개 중 {start + 1}-{end}번을 보여줍니다.")
+    st.caption(f"노출 많은 순으로 {start + 1}-{end}번을 보여줍니다.")
 
     for display_rank, candidate in enumerate(candidates[start:end], start=start + 1):
         candidate["rank"] = display_rank
@@ -517,7 +514,7 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
     st.markdown(f"#### {title}")
     st.caption(caption)
 
-    candidates, candidate_label, minimum_score = prepare_candidate_view(build_ranked_candidates(guide, category))
+    candidates = prepare_candidate_view(build_ranked_candidates(guide, category))
     if candidates and candidates[0].get("source") == "임시 랭킹":
         st.caption("아직 수집 CSV가 없어 임시 랭킹을 보여줍니다. 수집 스크립트를 실행하면 실제 데이터로 바뀝니다.")
     else:
@@ -525,10 +522,8 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
 
     render_candidate_list(
         candidates,
-        candidate_label,
         f"{guide['title']}_{category}_limit",
         include_stay=include_stay,
-        minimum_score=minimum_score,
     )
 
     st.markdown("##### 더 확인하기")
@@ -567,14 +562,12 @@ def render_live_region(region_name):
                 candidates = collect_live_candidates(region_name, category)
 
             if candidates:
-                candidates, candidate_label, minimum_score = prepare_candidate_view(candidates)
+                candidates = prepare_candidate_view(candidates)
                 st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
                 render_candidate_list(
                     candidates,
-                    candidate_label,
                     f"live_{region_name}_{category}_limit",
                     include_stay=category == "affordable_stays",
-                    minimum_score=minimum_score,
                 )
             else:
                 st.warning("이 카테고리의 후보를 아직 수집하지 못했어요. 검증 링크로 바로 이어갈게요.")
