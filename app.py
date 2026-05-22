@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from collections import Counter
 from difflib import SequenceMatcher
+from urllib.parse import quote_plus
 
 import streamlit as st
 import yfinance as yf
@@ -816,93 +817,6 @@ def get_company_interest_analysis(query, matched_issues, matched_news, extra_new
     }
 
 
-def get_supply_label(score):
-    if score >= 75:
-        return "수급 언급 강함"
-
-    if score >= 45:
-        return "수급 언급 보통"
-
-    if score >= 20:
-        return "수급 언급 약함"
-
-    return "수급 언급 부족"
-
-
-@st.cache_data(ttl=60 * 10)
-def get_news_supply_analysis(query):
-    supply_queries = [
-        f"{query} 수급",
-        f"{query} 외국인 순매수",
-        f"{query} 기관 순매수",
-        f"{query} 프로그램 매수",
-        f"{query} 거래대금",
-    ]
-    positive_words = [
-        "순매수", "매수", "유입", "사자", "상위", "증가", "급증",
-        "거래대금", "프로그램 매수", "외국인", "기관",
-    ]
-    negative_words = [
-        "순매도", "매도", "이탈", "감소", "급감", "팔자",
-        "하락", "약세",
-    ]
-
-    supply_news = []
-    seen_links = set()
-
-    for supply_query in supply_queries:
-        for news in get_naver_news(supply_query, display=5, require_market=False):
-            if news["link"] in seen_links:
-                continue
-
-            seen_links.add(news["link"])
-            supply_news.append(news)
-
-    positive_hits = 0
-    negative_hits = 0
-    signal_words = []
-
-    for news in supply_news:
-        title = news["title"]
-
-        for word in positive_words:
-            if word in title:
-                positive_hits += 1
-                signal_words.append(word)
-
-        for word in negative_words:
-            if word in title:
-                negative_hits += 1
-                signal_words.append(word)
-
-    score = round(min(
-        100,
-        (len(supply_news) * 5)
-        + (positive_hits * 9)
-        - (negative_hits * 8)
-    ))
-    score = max(0, score)
-
-    if score >= 75:
-        summary = "수급 관련 뉴스 언급이 강합니다. 실제 외국인·기관 수급과 거래대금 확인 우선순위가 높습니다."
-    elif score >= 45:
-        summary = "수급 관련 언급이 일부 확인됩니다. 뉴스 재료와 실제 거래대금이 같이 붙는지 볼 필요가 있습니다."
-    elif score >= 20:
-        summary = "수급 관련 언급은 약하게 있습니다. 아직은 보조 참고 정도로 보는 것이 좋습니다."
-    else:
-        summary = "현재 네이버 뉴스 기준으로는 뚜렷한 수급 언급이 부족합니다."
-
-    return {
-        "score": score,
-        "label": get_supply_label(score),
-        "news": supply_news,
-        "positive_hits": positive_hits,
-        "negative_hits": negative_hits,
-        "signal_words": list(dict.fromkeys(signal_words))[:6],
-        "summary": summary,
-    }
-
-
 @st.cache_data(ttl=60 * 30)
 def get_company_report_links(query):
     report_queries = [
@@ -910,26 +824,72 @@ def get_company_report_links(query):
         f"{query} 증권사 리포트",
         f"{query} 목표주가",
         f"{query} 투자의견",
+        f"{query} 목표가 상향",
+        f"{query} 실적 전망 증권",
     ]
     report_words = [
-        "리포트", "목표주가", "투자의견", "매수", "상향",
-        "하향", "증권", "실적", "전망",
+        "리포트", "목표주가", "목표가", "투자의견", "매수", "중립",
+        "상향", "하향", "유지", "증권", "증권가", "실적", "전망",
+        "컨센서스", "어닝", "영업이익", "밸류에이션",
     ]
     report_news = []
     seen_links = set()
 
     for report_query in report_queries:
-        for news in get_naver_news(report_query, display=5, require_market=False):
+        for news in get_naver_news(report_query, display=10, require_market=False):
             if news["link"] in seen_links:
                 continue
 
-            if not any(word in news["title"] for word in report_words):
+            search_text = news["title"] + " " + " ".join(news["terms"])
+
+            if not any(word in search_text for word in report_words):
                 continue
 
             seen_links.add(news["link"])
             report_news.append(news)
 
     return report_news[:8]
+
+
+def get_report_search_links(query):
+    encoded_query = quote_plus(query)
+    code = get_stock_code(query)
+    research_keyword = quote_plus(code if code else query)
+    links = [
+        {
+            "label": "네이버 증권 종목분석 리포트",
+            "url": f"https://finance.naver.com/research/company_list.naver?searchType=itemCode&keyword={research_keyword}",
+        },
+        {
+            "label": "네이버 증권 리서치 홈",
+            "url": "https://finance.naver.com/research/",
+        },
+        {
+            "label": "네이버 뉴스 리포트 검색",
+            "url": f"https://search.naver.com/search.naver?where=news&query={quote_plus(query + ' 증권사 리포트')}",
+        },
+        {
+            "label": "목표주가/투자의견 검색",
+            "url": f"https://search.naver.com/search.naver?where=news&query={quote_plus(query + ' 목표주가 투자의견')}",
+        },
+        {
+            "label": "실적 전망 검색",
+            "url": f"https://search.naver.com/search.naver?where=news&query={quote_plus(query + ' 실적 전망 증권')}",
+        },
+    ]
+
+    if code:
+        links.insert(0, {
+            "label": "네이버 금융 종목 페이지",
+            "url": f"https://finance.naver.com/item/main.naver?code={code}",
+        })
+
+    links.append({
+        "label": "네이버 통합 리포트 검색",
+        "url": f"https://search.naver.com/search.naver?query={encoded_query}+%EC%A6%9D%EA%B6%8C%EC%82%AC+%EB%A6%AC%ED%8F%AC%ED%8A%B8",
+    })
+
+    return links
 
 
 def extract_terms(title):
@@ -1488,8 +1448,8 @@ if search_query:
         matched_news.append(news)
 
     extra_news = get_naver_news(search_query, display=10, require_market=False)
-    supply_analysis = get_news_supply_analysis(search_query)
     report_news = get_company_report_links(search_query)
+    report_search_links = get_report_search_links(search_query)
     interest_analysis = get_company_interest_analysis(
         search_query,
         matched_issues,
@@ -1512,32 +1472,17 @@ if search_query:
     if interest_analysis["related_stocks"]:
         st.write("연결 종목:", ", ".join(interest_analysis["related_stocks"]))
 
-    st.markdown("#### 뉴스 기반 수급 신호")
-
-    supply_cols = st.columns(3)
-    supply_cols[0].metric("수급 언급 점수", f"{supply_analysis['score']}점")
-    supply_cols[1].metric("판단", supply_analysis["label"])
-    supply_cols[2].metric("수급 관련 뉴스", f"{len(supply_analysis['news'])}개")
-
-    st.info(supply_analysis["summary"])
-
-    if supply_analysis["signal_words"]:
-        st.write("감지 단어:", ", ".join(supply_analysis["signal_words"]))
-
-    if supply_analysis["news"]:
-        with st.expander("수급 관련 뉴스 보기"):
-            for news in supply_analysis["news"][:8]:
-                st.markdown(f"- [{news['title']}]({news['link']})")
-
-    st.caption("이 수급 신호는 뉴스 제목 기반 보조 지표입니다. 실제 순매수·거래대금 데이터는 증권사 API 연결 후 확인해야 합니다.")
-
     st.markdown("#### 관련 리포트/목표주가 연결")
 
+    for link in report_search_links:
+        st.markdown(f"- [{link['label']}]({link['url']})")
+
     if report_news:
+        st.markdown("##### 검색된 리포트/목표주가 뉴스")
         for news in report_news[:8]:
             st.markdown(f"- [{news['title']}]({news['link']})")
     else:
-        st.caption("네이버 뉴스 기준으로 연결할 리포트/목표주가 뉴스가 아직 부족합니다.")
+        st.caption("자동으로 걸린 리포트성 뉴스는 부족하지만, 위 검색 링크에서 직접 확인할 수 있습니다.")
 
     st.caption(
         f"현재 수집 뉴스 기준: 이슈 묶음 {len(matched_issues)}개 / 개별 뉴스 {len(matched_news)}개"
