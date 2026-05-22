@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 from collections import Counter
+from difflib import SequenceMatcher
 
 import streamlit as st
 import yfinance as yf
@@ -12,6 +13,11 @@ try:
     from kiwipiepy import Kiwi
 except ImportError:
     Kiwi = None
+
+try:
+    from pykrx import stock as krx_stock
+except ImportError:
+    krx_stock = None
 
 
 KST = timezone(timedelta(hours=9))
@@ -97,6 +103,7 @@ st.divider()
 st.subheader("경제 흐름")
 
 
+@st.cache_data(ttl=60 * 10)
 def get_price(ticker, suffix=""):
     try:
         data = yf.Ticker(ticker).history(period="1d")
@@ -160,6 +167,10 @@ noise_words = {
     "기존", "다음", "결과", "분석", "전문가", "관측", "평가", "설명",
     "계획", "전략", "방안", "방향", "부분", "내용", "이후", "이전",
     "현재", "과거", "미래", "상태", "수준", "흐름", "전환", "확보",
+    "이슈", "속도", "규모", "분위기", "관심", "주목", "기대", "우려",
+    "영향", "여파", "부담", "강세", "약세", "호조", "부진", "반등",
+    "출시", "판매", "고객", "서비스", "시스템", "플랫폼", "솔루션",
+    "가격", "비중", "정도", "관련주", "테마주", "수혜주", "수혜",
     "quot", "amp", "종합", "포토", "영상", "속보", "단독",
     "the", "and", "for", "with", "from", "that", "this", "are", "was",
     "were", "have", "will", "news", "says", "after", "about", "into",
@@ -188,6 +199,7 @@ market_signal_words = {
     "원전", "로봇", "바이오", "제약", "철강", "화학", "정유", "해운",
     "항공", "건설", "부동산", "은행", "보험", "증권", "ai", "hbm", "gpu",
     "데이터센터", "엔비디아", "테슬라", "삼성전자", "sk하이닉스",
+    "sk하이닉스", "현대차", "기아", "naver", "카카오",
 }
 
 macro_context_words = {
@@ -248,12 +260,30 @@ theme_stock_map = {
     "항공": ["대한항공", "아시아나항공", "제주항공", "한국항공우주"],
 }
 
+stock_names = {
+    stock.lower()
+    for stocks in theme_stock_map.values()
+    for stock in stocks
+}
+
 
 def clean_title(title):
     title = re.sub("<.*?>", "", title)
     title = title.split(" - ")[0]
     title = title.replace("[속보]", "").replace("[단독]", "").replace("[종합]", "")
     return re.sub(r"\s+", " ", title).strip()
+
+
+def normalize_title_for_match(title):
+    title = clean_title(title).lower()
+    title = re.sub(r"\[[^\]]+\]|\([^)]*\)", " ", title)
+    words = re.findall(r"[가-힣A-Za-z0-9]+", title)
+    words = [
+        word for word in words
+        if not is_noise_term(word) and len(word) >= 2
+    ]
+
+    return " ".join(words)
 
 
 def get_candidate_words(title):
@@ -304,6 +334,72 @@ def is_signal_term(term):
         return not re.search(r"(일보|기자|신문|방송|뉴스|닷컴)$", term)
 
     return len(lower) >= 3
+
+
+def is_display_keyword(term):
+    lower = term.lower()
+
+    if not is_signal_term(term):
+        return False
+
+    if lower in important_short_terms:
+        return True
+
+    if lower in stock_names:
+        return True
+
+    if term in theme_words or term in market_signal_words:
+        return True
+
+    if len(term) >= 4:
+        return True
+
+    return False
+
+
+def get_merge_terms(news):
+    return {
+        term for term in news["terms"]
+        if is_display_keyword(term) or term in theme_words or term in market_signal_words
+    }
+
+
+def should_merge_news(news1, news2):
+    terms1 = get_merge_terms(news1)
+    terms2 = get_merge_terms(news2)
+    common_terms = terms1.intersection(terms2)
+
+    if len(common_terms) >= 2:
+        return True
+
+    if terms1 and terms2:
+        union_terms = terms1.union(terms2)
+        jaccard = len(common_terms) / len(union_terms)
+
+        if jaccard >= 0.35 and len(common_terms) >= 1:
+            return True
+
+    title1 = normalize_title_for_match(news1["title"])
+    title2 = normalize_title_for_match(news2["title"])
+
+    if not title1 or not title2:
+        return False
+
+    title_similarity = SequenceMatcher(None, title1, title2).ratio()
+
+    if title_similarity >= 0.58:
+        return True
+
+    title_terms1 = set(title1.split())
+    title_terms2 = set(title2.split())
+
+    if title_terms1 and title_terms2:
+        title_common = title_terms1.intersection(title_terms2)
+        title_union = title_terms1.union(title_terms2)
+
+        return len(title_common) >= 2 and (len(title_common) / len(title_union)) >= 0.3
+
+    return False
 
 
 def get_market_relevance_score(title, terms):
@@ -373,6 +469,121 @@ def get_related_stocks_from_terms(terms, limit=8):
 
 def get_issue_related_stocks(item, limit=6):
     return get_related_stocks_from_terms(collect_issue_terms(item), limit=limit)
+
+
+@st.cache_data(ttl=60 * 60 * 6)
+def get_krx_stock_code_map():
+    if not krx_stock:
+        return {}
+
+    try:
+        tickers = krx_stock.get_market_ticker_list(market="ALL")
+        return {
+            krx_stock.get_market_ticker_name(ticker): ticker
+            for ticker in tickers
+        }
+    except Exception:
+        return {}
+
+
+def get_stock_code(stock_name):
+    code_map = get_krx_stock_code_map()
+
+    if stock_name in code_map:
+        return code_map[stock_name]
+
+    normalized_name = re.sub(r"\s+", "", stock_name).lower()
+
+    for name, code in code_map.items():
+        if re.sub(r"\s+", "", name).lower() == normalized_name:
+            return code
+
+    return None
+
+
+@st.cache_data(ttl=60 * 30)
+def get_stock_market_snapshot(stock_name):
+    code = get_stock_code(stock_name)
+
+    if not code or not krx_stock:
+        return {
+            "code": code,
+            "price": "-",
+            "trade_value": "-",
+            "trade_ratio": "-",
+            "ma_status": "데이터 없음",
+            "pullback": "-",
+            "chart_score": 0,
+            "naver_url": "",
+        }
+
+    end_date = get_kst_now().strftime("%Y%m%d")
+    start_date = (get_kst_now() - timedelta(days=120)).strftime("%Y%m%d")
+
+    try:
+        price_data = krx_stock.get_market_ohlcv_by_date(start_date, end_date, code)
+
+        if price_data.empty or len(price_data) < 20:
+            raise ValueError("not enough price data")
+
+        close = price_data["종가"]
+        latest_close = int(close.iloc[-1])
+        latest_trade_value = int(price_data["거래대금"].iloc[-1])
+        avg_trade_value_5 = int(price_data["거래대금"].tail(5).mean())
+        trade_ratio = latest_trade_value / avg_trade_value_5 if avg_trade_value_5 else 0
+        ma5 = close.tail(5).mean()
+        ma20 = close.tail(20).mean()
+        high_20 = close.tail(20).max()
+        pullback = ((latest_close / high_20) - 1) * 100 if high_20 else 0
+
+        chart_score = 0
+
+        if latest_close >= ma20:
+            chart_score += 35
+
+        if latest_close >= ma5:
+            chart_score += 25
+
+        if -12 <= pullback <= -3:
+            chart_score += 20
+
+        if trade_ratio >= 1.2:
+            chart_score += 20
+
+        ma_status = []
+
+        if latest_close >= ma5:
+            ma_status.append("5일선 위")
+        else:
+            ma_status.append("5일선 아래")
+
+        if latest_close >= ma20:
+            ma_status.append("20일선 위")
+        else:
+            ma_status.append("20일선 아래")
+
+        return {
+            "code": code,
+            "price": f"{latest_close:,}",
+            "trade_value": f"{latest_trade_value / 100000000:.1f}억",
+            "trade_ratio": f"{trade_ratio:.1f}배",
+            "ma_status": " / ".join(ma_status),
+            "pullback": f"{pullback:.1f}%",
+            "chart_score": chart_score,
+            "naver_url": f"https://finance.naver.com/item/main.naver?code={code}",
+        }
+
+    except Exception:
+        return {
+            "code": code,
+            "price": "-",
+            "trade_value": "-",
+            "trade_ratio": "-",
+            "ma_status": "데이터 없음",
+            "pullback": "-",
+            "chart_score": 0,
+            "naver_url": f"https://finance.naver.com/item/main.naver?code={code}",
+        }
 
 
 def get_issue_themes(item):
@@ -468,14 +679,23 @@ def get_stock_candidate_rows(theme_profiles, limit=10):
     rows = []
 
     for stock, score in stock_counter.most_common(limit):
+        snapshot = get_stock_market_snapshot(stock)
+        total_score = score + snapshot["chart_score"]
+
         rows.append({
             "종목": stock,
             "연결테마": ", ".join(stock_themes[stock][:3]),
             "뉴스연결점수": score,
-            "확인포인트": "수급·거래대금·차트 위치 확인",
+            "현재가": snapshot["price"],
+            "거래대금": snapshot["trade_value"],
+            "거래대금비": snapshot["trade_ratio"],
+            "차트위치": snapshot["ma_status"],
+            "눌림률": snapshot["pullback"],
+            "확인점수": total_score,
+            "네이버차트": snapshot["naver_url"],
         })
 
-    return rows
+    return sorted(rows, key=lambda x: x["확인점수"], reverse=True)
 
 
 def get_risk_alerts(issue_results):
@@ -501,6 +721,215 @@ def get_risk_alerts(issue_results):
             })
 
     return alerts[:3]
+
+
+def get_interest_label(score):
+    if score >= 80:
+        return "높음"
+
+    if score >= 55:
+        return "보통 이상"
+
+    if score >= 30:
+        return "관찰"
+
+    return "낮음"
+
+
+def get_company_interest_analysis(query, matched_issues, matched_news, extra_news):
+    issue_attention = sum(item["attention_score"] for item in matched_issues)
+    issue_news_count = sum(item["cluster_size"] for item in matched_issues)
+    direct_news_count = len(matched_news)
+    extra_news_count = len(extra_news)
+
+    all_terms = []
+    all_titles = []
+
+    for item in matched_issues:
+        all_terms.extend(collect_issue_terms(item))
+        all_titles.append(item["issue"])
+
+    for news in matched_news + extra_news:
+        all_terms.extend(news["terms"])
+        all_titles.append(news["title"])
+
+    related_themes = [
+        term for term in dict.fromkeys(all_terms)
+        if term in theme_words
+    ][:5]
+    related_stocks = get_related_stocks_from_terms(related_themes, limit=6)
+
+    text = (query + " " + " ".join(all_titles) + " " + " ".join(all_terms)).lower()
+    matched_risks = [
+        word for word in risk_words
+        if word.lower() in text
+    ][:5]
+
+    score = round(min(
+        100,
+        (len(matched_issues) * 16)
+        + (issue_news_count * 3)
+        + (direct_news_count * 3)
+        + (extra_news_count * 2)
+        + (issue_attention / 3)
+        + (len(related_themes) * 5)
+        - (len(matched_risks) * 4)
+    ))
+
+    if not matched_issues and not matched_news and not extra_news:
+        score = 0
+
+    reasons = []
+
+    if matched_issues:
+        reasons.append(f"관련 이슈 묶음 {len(matched_issues)}개")
+
+    if direct_news_count:
+        reasons.append(f"현재 수집 뉴스 {direct_news_count}개")
+
+    if extra_news_count:
+        reasons.append(f"추가 검색 뉴스 {extra_news_count}개")
+
+    if related_themes:
+        reasons.append("연결 테마: " + ", ".join(related_themes[:3]))
+
+    if matched_risks:
+        reasons.append("주의 단어: " + ", ".join(matched_risks[:3]))
+
+    if score >= 80:
+        summary = "시장 노출이 강한 편입니다. 뉴스 반복성과 테마 연결이 같이 확인됩니다."
+    elif score >= 55:
+        summary = "관심이 붙는 구간입니다. 관련 뉴스가 이어지는지와 거래대금 유입을 함께 볼 필요가 있습니다."
+    elif score >= 30:
+        summary = "관찰할 만한 노출은 있습니다. 아직 강한 흐름인지 확인이 더 필요합니다."
+    else:
+        summary = "현재 수집 기준으로는 시장 관심이 약합니다. 추가 뉴스나 테마 연결이 더 필요합니다."
+
+    return {
+        "score": score,
+        "label": get_interest_label(score),
+        "related_themes": related_themes,
+        "related_stocks": related_stocks,
+        "risks": matched_risks,
+        "reasons": reasons,
+        "summary": summary,
+    }
+
+
+def get_supply_label(score):
+    if score >= 75:
+        return "수급 언급 강함"
+
+    if score >= 45:
+        return "수급 언급 보통"
+
+    if score >= 20:
+        return "수급 언급 약함"
+
+    return "수급 언급 부족"
+
+
+@st.cache_data(ttl=60 * 10)
+def get_news_supply_analysis(query):
+    supply_queries = [
+        f"{query} 수급",
+        f"{query} 외국인 순매수",
+        f"{query} 기관 순매수",
+        f"{query} 프로그램 매수",
+        f"{query} 거래대금",
+    ]
+    positive_words = [
+        "순매수", "매수", "유입", "사자", "상위", "증가", "급증",
+        "거래대금", "프로그램 매수", "외국인", "기관",
+    ]
+    negative_words = [
+        "순매도", "매도", "이탈", "감소", "급감", "팔자",
+        "하락", "약세",
+    ]
+
+    supply_news = []
+    seen_links = set()
+
+    for supply_query in supply_queries:
+        for news in get_naver_news(supply_query, display=5, require_market=False):
+            if news["link"] in seen_links:
+                continue
+
+            seen_links.add(news["link"])
+            supply_news.append(news)
+
+    positive_hits = 0
+    negative_hits = 0
+    signal_words = []
+
+    for news in supply_news:
+        title = news["title"]
+
+        for word in positive_words:
+            if word in title:
+                positive_hits += 1
+                signal_words.append(word)
+
+        for word in negative_words:
+            if word in title:
+                negative_hits += 1
+                signal_words.append(word)
+
+    score = round(min(
+        100,
+        (len(supply_news) * 5)
+        + (positive_hits * 9)
+        - (negative_hits * 8)
+    ))
+    score = max(0, score)
+
+    if score >= 75:
+        summary = "수급 관련 뉴스 언급이 강합니다. 실제 외국인·기관 수급과 거래대금 확인 우선순위가 높습니다."
+    elif score >= 45:
+        summary = "수급 관련 언급이 일부 확인됩니다. 뉴스 재료와 실제 거래대금이 같이 붙는지 볼 필요가 있습니다."
+    elif score >= 20:
+        summary = "수급 관련 언급은 약하게 있습니다. 아직은 보조 참고 정도로 보는 것이 좋습니다."
+    else:
+        summary = "현재 네이버 뉴스 기준으로는 뚜렷한 수급 언급이 부족합니다."
+
+    return {
+        "score": score,
+        "label": get_supply_label(score),
+        "news": supply_news,
+        "positive_hits": positive_hits,
+        "negative_hits": negative_hits,
+        "signal_words": list(dict.fromkeys(signal_words))[:6],
+        "summary": summary,
+    }
+
+
+@st.cache_data(ttl=60 * 30)
+def get_company_report_links(query):
+    report_queries = [
+        f"{query} 리포트",
+        f"{query} 증권사 리포트",
+        f"{query} 목표주가",
+        f"{query} 투자의견",
+    ]
+    report_words = [
+        "리포트", "목표주가", "투자의견", "매수", "상향",
+        "하향", "증권", "실적", "전망",
+    ]
+    report_news = []
+    seen_links = set()
+
+    for report_query in report_queries:
+        for news in get_naver_news(report_query, display=5, require_market=False):
+            if news["link"] in seen_links:
+                continue
+
+            if not any(word in news["title"] for word in report_words):
+                continue
+
+            seen_links.add(news["link"])
+            report_news.append(news)
+
+    return report_news[:8]
 
 
 def extract_terms(title):
@@ -596,6 +1025,8 @@ def get_article_nature_score(text):
 
     return score
 
+
+@st.cache_data(ttl=60 * 10)
 def get_naver_news(query="경제", display=20, require_market=True):
     url = "https://openapi.naver.com/v1/search/news.json"
 
@@ -770,7 +1201,7 @@ seed_counter = Counter()
 
 for news in news_data:
     for term in news["terms"]:
-        if not is_signal_term(term):
+        if not is_display_keyword(term):
             continue
 
         seed_counter[term] += 1
@@ -809,9 +1240,7 @@ for i, news1 in enumerate(news_data):
         if j in used:
             continue
 
-        common_terms = news1["term_set"].intersection(news2["term_set"])
-
-        if len(common_terms) >= 2:
+        if should_merge_news(news1, news2):
             cluster.append(news2)
             used.add(j)
 
@@ -832,7 +1261,7 @@ for cluster in clusters:
     term_counts = Counter(all_terms)
     top_terms = [
         word for word, count in term_counts.most_common()
-        if is_signal_term(word)
+        if is_display_keyword(word)
     ][:5]
 
     representative = cluster[0]
@@ -889,7 +1318,7 @@ for news in news_data:
         if len(term) < 2:
             continue
 
-        if not is_signal_term(term):
+        if not is_display_keyword(term):
             continue
 
         keyword_counter[term] = keyword_counter.get(term, 0) + 1
@@ -974,8 +1403,14 @@ if stock_candidate_rows:
         pd.DataFrame(stock_candidate_rows),
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "네이버차트": st.column_config.LinkColumn(
+                "네이버차트",
+                display_text="차트 보기"
+            )
+        },
     )
-    st.caption("뉴스 연결점수는 매수 신호가 아니라, 어떤 종목을 먼저 확인할지 정렬하는 참고 점수입니다.")
+    st.caption("확인점수는 뉴스 연결점수와 차트/거래대금 보조 점수를 합친 참고 점수입니다.")
 else:
     st.caption("아직 관련 종목 후보를 만들 만큼 뚜렷한 테마가 없습니다.")
 
@@ -1052,6 +1487,58 @@ if search_query:
         seen_links.add(news["link"])
         matched_news.append(news)
 
+    extra_news = get_naver_news(search_query, display=10, require_market=False)
+    supply_analysis = get_news_supply_analysis(search_query)
+    report_news = get_company_report_links(search_query)
+    interest_analysis = get_company_interest_analysis(
+        search_query,
+        matched_issues,
+        matched_news,
+        extra_news
+    )
+
+    st.markdown("#### 시장 관심도 분석")
+
+    interest_cols = st.columns(3)
+    interest_cols[0].metric("관심도 점수", f"{interest_analysis['score']}점")
+    interest_cols[1].metric("관심 단계", interest_analysis["label"])
+    interest_cols[2].metric("뉴스 노출", f"{len(matched_news) + len(extra_news)}개")
+
+    st.info(interest_analysis["summary"])
+
+    if interest_analysis["reasons"]:
+        st.write("판단 근거:", " / ".join(interest_analysis["reasons"]))
+
+    if interest_analysis["related_stocks"]:
+        st.write("연결 종목:", ", ".join(interest_analysis["related_stocks"]))
+
+    st.markdown("#### 뉴스 기반 수급 신호")
+
+    supply_cols = st.columns(3)
+    supply_cols[0].metric("수급 언급 점수", f"{supply_analysis['score']}점")
+    supply_cols[1].metric("판단", supply_analysis["label"])
+    supply_cols[2].metric("수급 관련 뉴스", f"{len(supply_analysis['news'])}개")
+
+    st.info(supply_analysis["summary"])
+
+    if supply_analysis["signal_words"]:
+        st.write("감지 단어:", ", ".join(supply_analysis["signal_words"]))
+
+    if supply_analysis["news"]:
+        with st.expander("수급 관련 뉴스 보기"):
+            for news in supply_analysis["news"][:8]:
+                st.markdown(f"- [{news['title']}]({news['link']})")
+
+    st.caption("이 수급 신호는 뉴스 제목 기반 보조 지표입니다. 실제 순매수·거래대금 데이터는 증권사 API 연결 후 확인해야 합니다.")
+
+    st.markdown("#### 관련 리포트/목표주가 연결")
+
+    if report_news:
+        for news in report_news[:8]:
+            st.markdown(f"- [{news['title']}]({news['link']})")
+    else:
+        st.caption("네이버 뉴스 기준으로 연결할 리포트/목표주가 뉴스가 아직 부족합니다.")
+
     st.caption(
         f"현재 수집 뉴스 기준: 이슈 묶음 {len(matched_issues)}개 / 개별 뉴스 {len(matched_news)}개"
     )
@@ -1085,8 +1572,6 @@ if search_query:
 
         for news in matched_news[:10]:
             st.markdown(f"- [{news['title']}]({news['link']})")
-
-    extra_news = get_naver_news(search_query, display=10, require_market=False)
 
     if extra_news:
         st.markdown("#### 네이버 추가 검색")
