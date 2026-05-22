@@ -456,32 +456,55 @@ def prepare_candidate_view(candidates, minimum_score=70, max_candidates=50):
     ]
 
     if qualified:
-        return qualified[:max_candidates], f"반응 점수 {minimum_score}점 이상"
+        return qualified[:max_candidates], f"반응 점수 {minimum_score}점 이상", minimum_score
 
-    return candidates[:max_candidates], "수집된"
+    return candidates[:max_candidates], "수집된", None
 
 
 def candidate_page(candidates, key, page_size=10):
     candidate_count = len(candidates)
+    total_pages = max(1, (candidate_count + page_size - 1) // page_size)
+    page_key = f"{key}_page"
+    current_page = st.session_state.get(page_key, 1)
+    current_page = min(max(current_page, 1), total_pages)
 
     if candidate_count <= page_size:
         return 1, 0, candidate_count
 
-    total_pages = (candidate_count + page_size - 1) // page_size
-    page_options = list(range(1, total_pages + 1))
-    page = st.selectbox(
-        "페이지",
-        options=page_options,
-        format_func=lambda value: f"{value} / {total_pages}",
-        key=key,
+    nav_cols = st.columns([1, 1, 2])
+    previous_clicked = nav_cols[0].button(
+        "이전",
+        key=f"{key}_previous",
+        disabled=current_page <= 1,
+        width="stretch",
     )
-    start = (page - 1) * page_size
+    next_clicked = nav_cols[1].button(
+        "다음",
+        key=f"{key}_next",
+        disabled=current_page >= total_pages,
+        width="stretch",
+    )
+
+    if previous_clicked:
+        current_page -= 1
+    if next_clicked:
+        current_page += 1
+
+    st.session_state[page_key] = current_page
+    nav_cols[2].caption(f"{current_page} / {total_pages} 페이지")
+
+    start = (current_page - 1) * page_size
     end = min(start + page_size, candidate_count)
 
-    return page, start, end
+    return current_page, start, end
 
 
-def render_candidate_list(candidates, label, key, include_stay=False):
+def render_candidate_list(candidates, label, key, include_stay=False, minimum_score=None):
+    if minimum_score:
+        st.success(f"반응 점수 {minimum_score}점 이상 후보가 {len(candidates)}개 검색되었습니다.")
+    else:
+        st.info(f"70점 이상 후보가 부족해 수집된 후보 {len(candidates)}개를 보여줍니다.")
+
     page, start, end = candidate_page(candidates, key)
     st.caption(f"{label} 후보 {len(candidates)}개 중 {start + 1}-{end}번을 보여줍니다.")
 
@@ -494,7 +517,7 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
     st.markdown(f"#### {title}")
     st.caption(caption)
 
-    candidates, candidate_label = prepare_candidate_view(build_ranked_candidates(guide, category))
+    candidates, candidate_label, minimum_score = prepare_candidate_view(build_ranked_candidates(guide, category))
     if candidates and candidates[0].get("source") == "임시 랭킹":
         st.caption("아직 수집 CSV가 없어 임시 랭킹을 보여줍니다. 수집 스크립트를 실행하면 실제 데이터로 바뀝니다.")
     else:
@@ -505,6 +528,7 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
         candidate_label,
         f"{guide['title']}_{category}_limit",
         include_stay=include_stay,
+        minimum_score=minimum_score,
     )
 
     st.markdown("##### 더 확인하기")
@@ -543,13 +567,14 @@ def render_live_region(region_name):
                 candidates = collect_live_candidates(region_name, category)
 
             if candidates:
-                candidates, candidate_label = prepare_candidate_view(candidates)
+                candidates, candidate_label, minimum_score = prepare_candidate_view(candidates)
                 st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
                 render_candidate_list(
                     candidates,
                     candidate_label,
                     f"live_{region_name}_{category}_limit",
                     include_stay=category == "affordable_stays",
+                    minimum_score=minimum_score,
                 )
             else:
                 st.warning("이 카테고리의 후보를 아직 수집하지 못했어요. 검증 링크로 바로 이어갈게요.")
