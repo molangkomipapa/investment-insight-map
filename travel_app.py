@@ -5,9 +5,34 @@ from urllib.parse import quote_plus
 import pandas as pd
 import streamlit as st
 
+try:
+    from collect_social_candidates import (
+        count_mentions,
+        local_candidates,
+        score_candidate,
+    )
+except ImportError:
+    count_mentions = None
+    local_candidates = None
+    score_candidate = None
+
 
 KST = timezone(timedelta(hours=9))
 SOCIAL_CANDIDATES_FILE = Path("data/social_candidates.csv")
+CATEGORY_LABELS = {
+    "foods": "먹을 곳",
+    "affordable_stays": "저렴한 숙소",
+    "camping": "캠핑장",
+    "places": "갈 곳·즐길거리",
+    "desserts": "디저트·카페",
+}
+CATEGORY_CAPTIONS = {
+    "foods": "식사는 현지 음식, 시장, 리뷰 반복 노출을 우선으로 봅니다.",
+    "affordable_stays": "가격, 청결, 위치, 주차 언급이 같이 잡히는 숙소 후보를 먼저 보여줍니다.",
+    "camping": "캠핑장은 화장실, 샤워실, 사이트 간격, 예약 후기를 별도로 봅니다.",
+    "places": "명소, 산책, 체험, 사진 포인트를 섞어서 먼저 추려줍니다.",
+    "desserts": "식사와 분리해서 빵집, 카페, 디저트 언급이 많은 후보를 보여줍니다.",
+}
 
 
 REGION_GUIDES = {
@@ -82,13 +107,13 @@ REGION_GUIDES = {
 
 SITUATION_GUIDES = {
     "계곡": {
-        "summary": "물놀이와 캠핑을 같이 보기 좋고, 숙소는 펜션·캠핑장 중심으로 비교하면 좋아요.",
-        "regions": ["가평", "양양", "인제", "포천", "무주", "지리산"],
+        "summary": "계곡은 수도권 근교, 강원 산간, 충청·전라·경상권까지 선택지가 넓어요. 거리, 물놀이 난이도, 캠핑 가능 여부로 좁히면 좋습니다.",
+        "regions": ["가평", "포천", "양평", "홍천", "인제", "양양", "괴산", "제천", "무주", "지리산", "청도", "밀양"],
         "searches": ["계곡 캠핑장", "계곡 백숙 맛집", "계곡 근처 저렴한 숙소", "아이와 가기 좋은 계곡"],
     },
     "바다": {
         "summary": "조용한 해변, 도시 바다, 섬 여행처럼 원하는 분위기에 따라 지역을 고르면 좋아요.",
-        "regions": ["동해", "강릉", "속초", "부산", "제주", "여수"],
+        "regions": ["강릉", "속초", "동해", "양양", "고성", "태안", "보령", "군산", "부산", "여수", "남해", "제주"],
         "searches": ["오션뷰 카페", "바다 근처 가성비 숙소", "해산물 맛집", "해변 산책 코스"],
     },
     "캠핑": {
@@ -128,6 +153,35 @@ def search_url(query, service):
     if service == "booking":
         return f"https://www.google.com/search?q={quote_plus(query + ' 저렴한 숙소 후기')}"
     return f"https://www.google.com/search?q={encoded}"
+
+
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def estimate_cost(category, name):
+    text = normalize(name)
+
+    if category == "affordable_stays":
+        if any(word in text for word in ["게스트하우스", "호스텔"]):
+            return "예상 1박 3만-7만원"
+        if any(word in text for word in ["모텔", "비즈니스호텔"]):
+            return "예상 1박 5만-10만원"
+        if any(word in text for word in ["리조트", "펜션", "풀빌라"]):
+            return "예상 1박 8만-18만원"
+        return "예상 1박 5만-12만원"
+
+    if category == "camping":
+        if any(word in text for word in ["글램핑", "카라반"]):
+            return "예상 1박 7만-18만원"
+        if any(word in text for word in ["오토", "캠핑", "야영"]):
+            return "예상 1박 2만-7만원"
+        return "예상 1박 3만-10만원"
+
+    return ""
 
 
 def find_region(query):
@@ -236,8 +290,9 @@ def get_real_candidates(region_name, category, limit=10):
             "source": row.get("source", "수집 데이터"),
             "address": row.get("address", ""),
             "source_count": int(row.get("source_count", 1) or 1),
-            "kakao_match": bool(row.get("kakao_match", False)),
-            "tourapi_match": bool(row.get("tourapi_match", False)),
+            "kakao_match": parse_bool(row.get("kakao_match", False)),
+            "tourapi_match": parse_bool(row.get("tourapi_match", False)),
+            "cost_hint": estimate_cost(category, row["name"]),
             "metrics": {
                 "score": int(row["score"]),
                 "blog": int(row.get("blog_mentions", 0) or 0),
@@ -279,10 +334,59 @@ def build_ranked_candidates(guide, category, limit=10):
             "name": name,
             "query": name,
             "source": "임시 랭킹",
+            "address": "",
+            "cost_hint": estimate_cost(category, name),
             "metrics": metrics,
         })
 
     return sorted(candidates, key=lambda item: item["metrics"]["score"], reverse=True)
+
+
+@st.cache_data(ttl=60 * 30)
+def collect_live_candidates(region_name, category, limit=10):
+    if not local_candidates or not count_mentions or not score_candidate:
+        return []
+
+    candidates = []
+
+    try:
+        raw_candidates = local_candidates(region_name, category)
+    except Exception:
+        return []
+
+    for item in raw_candidates:
+        query = item.get("query") or f"{region_name} {item['name']}"
+        blog_mentions = count_mentions("blog", query)
+        cafe_mentions = count_mentions("cafearticle", query)
+        metrics = {
+            "blog": blog_mentions,
+            "instagram": 0,
+            "cafe": cafe_mentions,
+            "facebook": 0,
+            "score": score_candidate(
+                blog_mentions,
+                cafe_mentions,
+                source_count=item.get("source_count", 1),
+                kakao_match=item.get("kakao_match", False),
+                tourapi_match=item.get("tourapi_match", False),
+            ),
+        }
+        candidates.append({
+            "rank": 0,
+            "name": item["name"],
+            "query": query,
+            "source": item.get("source", "live_search"),
+            "address": item.get("address", ""),
+            "source_count": item.get("source_count", 1),
+            "cost_hint": estimate_cost(category, item["name"]),
+            "metrics": metrics,
+        })
+
+    candidates = sorted(candidates, key=lambda item: item["metrics"]["score"], reverse=True)
+    for index, candidate in enumerate(candidates[:limit], start=1):
+        candidate["rank"] = index
+
+    return candidates[:limit]
 
 
 def render_candidate_card(candidate, include_stay=False):
@@ -297,7 +401,9 @@ def render_candidate_card(candidate, include_stay=False):
                 f"카페 {metrics['cafe']} · 페이스북 {metrics['facebook']}"
             )
             if candidate.get("address"):
-                st.caption(candidate["address"])
+                st.caption(f"위치: {candidate['address']}")
+            if candidate.get("cost_hint"):
+                st.caption(f"비용: {candidate['cost_hint']}")
             st.caption(
                 f"데이터: {candidate.get('source', '수집 데이터')} · "
                 f"출처 {candidate.get('source_count', 1)}개"
@@ -334,6 +440,49 @@ def render_ranked_section(guide, category, title, caption, include_stay=False):
         "desserts": f"{guide['title']} 빵집 카페 디저트",
     }[category]
     link_row(broad_query, include_stay=include_stay)
+
+
+def render_live_region(region_name):
+    st.markdown(
+        f"""
+        <section class="hero" style="background-image: linear-gradient(90deg, rgba(16, 22, 28, .72), rgba(16, 22, 28, .2)), url('https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80');">
+            <div>
+                <p class="eyebrow">실시간 지역 검색</p>
+                <h1>{region_name}</h1>
+                <p class="hero-copy">준비된 지역 데이터가 없어도 공식 검색 API로 후보를 먼저 수집해서 보여줍니다.</p>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    section_tabs = st.tabs(list(CATEGORY_LABELS.values()))
+    categories = list(CATEGORY_LABELS.keys())
+
+    for tab, category in zip(section_tabs, categories):
+        with tab:
+            st.markdown(f"#### {CATEGORY_LABELS[category]} 후보 10")
+            st.caption(CATEGORY_CAPTIONS[category])
+            with st.spinner(f"{region_name} {CATEGORY_LABELS[category]} 후보를 수집하는 중입니다."):
+                candidates = collect_live_candidates(region_name, category)
+
+            if candidates:
+                st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
+                for candidate in candidates:
+                    render_candidate_card(
+                        candidate,
+                        include_stay=category == "affordable_stays",
+                    )
+            else:
+                st.warning("이 카테고리의 후보를 아직 수집하지 못했어요. 검증 링크로 바로 이어갈게요.")
+                fallback_query = {
+                    "foods": f"{region_name} 맛집",
+                    "affordable_stays": f"{region_name} 저렴한 숙소 후기",
+                    "camping": f"{region_name} 캠핑장",
+                    "places": f"{region_name} 가볼만한곳",
+                    "desserts": f"{region_name} 빵집 카페 디저트",
+                }[category]
+                link_row(fallback_query, include_stay=category == "affordable_stays")
 
 
 def render_chip_row(items):
@@ -418,7 +567,7 @@ def render_region(guide):
 
 def render_situation(query, situations):
     st.markdown("### 상황으로 찾기")
-    st.caption("지역 이름이 아니라 계곡, 바다, 캠핑처럼 가고 싶은 장면을 입력한 경우예요.")
+    st.caption("지역 이름이 아니라 계곡, 바다, 캠핑처럼 가고 싶은 장면을 입력한 경우예요. 먼저 여러 지역 후보를 보여주고, 마음에 드는 지역명으로 다시 검색하면 세부 후보가 나옵니다.")
 
     for key, guide in situations:
         with st.container(border=True):
@@ -427,14 +576,12 @@ def render_situation(query, situations):
             render_chip_row(guide["regions"])
 
             st.markdown("**추천 지역**")
-            region_cols = st.columns(3)
+            region_cols = st.columns(4)
             for index, region in enumerate(guide["regions"]):
-                with region_cols[index % 3]:
-                    st.link_button(
-                        f"{region} 검색",
-                        search_url(f"{region} {query}", "naver"),
-                        width="stretch",
-                    )
+                with region_cols[index % 4]:
+                    st.markdown(f"**{region}**")
+                    st.caption(f"{key} 여행 후보")
+                    st.link_button(f"{region} 지도 확인", search_url(f"{region} {query}", "naver_map"), width="stretch")
 
             st.markdown("**바로 써먹는 검색어**")
             for search in guide["searches"]:
@@ -660,15 +807,4 @@ else:
     elif situations:
         render_situation(query, situations)
     else:
-        st.warning("아직 앱 안에 준비된 지역/상황 데이터가 부족해요. 그래도 바로 검색할 수 있게 연결해둘게요.")
-        fallback_tabs = st.tabs(["먹을 곳", "저렴한 숙소", "캠핑장", "갈 곳", "디저트"])
-        with fallback_tabs[0]:
-            link_row(f"{query} 맛집")
-        with fallback_tabs[1]:
-            link_row(f"{query} 저렴한 숙소 후기", include_stay=True)
-        with fallback_tabs[2]:
-            link_row(f"{query} 캠핑장")
-        with fallback_tabs[3]:
-            link_row(f"{query} 가볼만한곳")
-        with fallback_tabs[4]:
-            link_row(f"{query} 빵집 카페 디저트")
+        render_live_region(query.strip())
