@@ -461,29 +461,31 @@ def prepare_candidate_view(candidates, minimum_score=70, max_candidates=50):
     return candidates[:max_candidates], "수집된"
 
 
-def candidate_display_limit(candidates, key):
+def candidate_page(candidates, key, page_size=10):
     candidate_count = len(candidates)
 
-    if candidate_count <= 10:
-        return candidate_count
+    if candidate_count <= page_size:
+        return 1, 0, candidate_count
 
-    options = list(range(10, candidate_count + 1, 10))
-    if options[-1] != candidate_count:
-        options.append(candidate_count)
-
-    return st.select_slider(
-        "표시할 후보 수",
-        options=options,
-        value=10,
+    total_pages = (candidate_count + page_size - 1) // page_size
+    page_options = list(range(1, total_pages + 1))
+    page = st.selectbox(
+        "페이지",
+        options=page_options,
+        format_func=lambda value: f"{value} / {total_pages}",
         key=key,
     )
+    start = (page - 1) * page_size
+    end = min(start + page_size, candidate_count)
+
+    return page, start, end
 
 
 def render_candidate_list(candidates, label, key, include_stay=False):
-    display_limit = candidate_display_limit(candidates, key)
-    st.caption(f"{label} 후보 {len(candidates)}개 중 {display_limit}개를 보여줍니다.")
+    page, start, end = candidate_page(candidates, key)
+    st.caption(f"{label} 후보 {len(candidates)}개 중 {start + 1}-{end}번을 보여줍니다.")
 
-    for display_rank, candidate in enumerate(candidates[:display_limit], start=1):
+    for display_rank, candidate in enumerate(candidates[start:end], start=start + 1):
         candidate["rank"] = display_rank
         render_candidate_card(candidate, include_stay=include_stay)
 
