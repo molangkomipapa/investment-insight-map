@@ -236,14 +236,16 @@ def tour_api_candidates(region, category, limit_per_query=10):
         if data is None:
             continue
 
-        items = (
-            data.get("response", {})
-            .get("body", {})
-            .get("items", {})
-            .get("item", [])
-        )
+        response_body = data.get("response", {}).get("body", {})
+        items_container = response_body.get("items", {})
+        if not isinstance(items_container, dict):
+            continue
+
+        items = items_container.get("item", [])
         if isinstance(items, dict):
             items = [items]
+        elif not isinstance(items, list):
+            continue
 
         for item in items:
             name = clean_html(item.get("title"))
@@ -303,11 +305,19 @@ def merge_candidates(*candidate_groups):
 
 
 def local_candidates(region, category):
-    return merge_candidates(
-        naver_local_candidates(region, category),
-        kakao_local_candidates(region, category),
-        tour_api_candidates(region, category),
-    )
+    candidate_groups = []
+
+    for provider in (
+        naver_local_candidates,
+        kakao_local_candidates,
+        tour_api_candidates,
+    ):
+        try:
+            candidate_groups.append(provider(region, category))
+        except Exception:
+            candidate_groups.append([])
+
+    return merge_candidates(*candidate_groups)
 
 
 def score_candidate(
