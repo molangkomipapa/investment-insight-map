@@ -799,12 +799,19 @@ if not query.strip():
     col4.link_button("디저트 카페", search_url("여행지 디저트 카페", "naver"), width="stretch")
 
 else:
-    region_key = find_region(query) if search_type in {"자동", "지역"} else None
-    situations = find_situations(query) if search_type in {"자동", "상황"} else []
+    if search_type == "상황":
+        region_key = None
+        situations = find_situations(query)
+    elif search_type == "지역":
+        region_key = find_region(query)
+        situations = []
+    else:
+        situations = find_situations(query)
+        region_key = None if situations else find_region(query)
 
-    if region_key:
-        render_region(REGION_GUIDES[region_key])
-    elif situations:
+    if situations:
         render_situation(query, situations)
+    elif region_key:
+        render_region(REGION_GUIDES[region_key])
     else:
         render_live_region(query.strip())
