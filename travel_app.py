@@ -445,36 +445,65 @@ def render_candidate_card(candidate, include_stay=False):
             link_row(candidate["query"], include_stay=include_stay)
 
 
-def candidate_display_limit(candidates, key):
-    if len(candidates) <= 10:
-        return len(candidates)
+def get_score(candidate):
+    return candidate.get("metrics", {}).get("score", 0)
 
-    return st.slider(
+
+def prepare_candidate_view(candidates, minimum_score=70, max_candidates=50):
+    qualified = [
+        candidate for candidate in candidates
+        if get_score(candidate) >= minimum_score
+    ]
+
+    if qualified:
+        return qualified[:max_candidates], f"반응 점수 {minimum_score}점 이상"
+
+    return candidates[:max_candidates], "수집된"
+
+
+def candidate_display_limit(candidates, key):
+    candidate_count = len(candidates)
+
+    if candidate_count <= 10:
+        return candidate_count
+
+    options = list(range(10, candidate_count + 1, 10))
+    if options[-1] != candidate_count:
+        options.append(candidate_count)
+
+    return st.select_slider(
         "표시할 후보 수",
-        min_value=10,
-        max_value=min(50, len(candidates)),
+        options=options,
         value=10,
-        step=10,
         key=key,
     )
+
+
+def render_candidate_list(candidates, label, key, include_stay=False):
+    display_limit = candidate_display_limit(candidates, key)
+    st.caption(f"{label} 후보 {len(candidates)}개 중 {display_limit}개를 보여줍니다.")
+
+    for display_rank, candidate in enumerate(candidates[:display_limit], start=1):
+        candidate["rank"] = display_rank
+        render_candidate_card(candidate, include_stay=include_stay)
 
 
 def render_ranked_section(guide, category, title, caption, include_stay=False):
     st.markdown(f"#### {title}")
     st.caption(caption)
 
-    candidates = build_ranked_candidates(guide, category)
-    display_limit = candidate_display_limit(candidates, f"{guide['title']}_{category}_limit")
+    candidates, candidate_label = prepare_candidate_view(build_ranked_candidates(guide, category))
     if candidates and candidates[0].get("source") == "임시 랭킹":
         st.caption("아직 수집 CSV가 없어 임시 랭킹을 보여줍니다. 수집 스크립트를 실행하면 실제 데이터로 바뀝니다.")
     else:
         st.caption("수집된 블로그·카페·소셜 반응 데이터를 합산해 정렬했습니다.")
 
-    st.caption(f"총 {len(candidates)}개 후보 중 상위 {display_limit}개를 보여줍니다.")
-
-    for display_rank, candidate in enumerate(candidates[:display_limit], start=1):
-        candidate["rank"] = display_rank
-        render_candidate_card(candidate, include_stay=include_stay)
+    render_candidate_list(
+        candidates,
+        candidate_label,
+        f"{guide['title']}_{category}_limit",
+        include_stay=include_stay,
+    )
 
     st.markdown("##### 더 확인하기")
     broad_query = {
@@ -512,17 +541,14 @@ def render_live_region(region_name):
                 candidates = collect_live_candidates(region_name, category)
 
             if candidates:
-                display_limit = candidate_display_limit(
-                    candidates,
-                    f"live_{region_name}_{category}_limit",
-                )
+                candidates, candidate_label = prepare_candidate_view(candidates)
                 st.caption("네이버 지역·블로그·카페와 사용 가능한 추가 API 신호를 합산해 정렬했습니다.")
-                st.caption(f"총 {len(candidates)}개 후보 중 상위 {display_limit}개를 보여줍니다.")
-                for candidate in candidates[:display_limit]:
-                    render_candidate_card(
-                        candidate,
-                        include_stay=category == "affordable_stays",
-                    )
+                render_candidate_list(
+                    candidates,
+                    candidate_label,
+                    f"live_{region_name}_{category}_limit",
+                    include_stay=category == "affordable_stays",
+                )
             else:
                 st.warning("이 카테고리의 후보를 아직 수집하지 못했어요. 검증 링크로 바로 이어갈게요.")
                 fallback_query = {
