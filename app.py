@@ -23,6 +23,10 @@ except ImportError:
 
 KST = timezone(timedelta(hours=9))
 kiwi = Kiwi() if Kiwi else None
+RSS_ENTRY_LIMIT = 20
+NAVER_BASE_DISPLAY = 12
+EXPANSION_QUERY_LIMIT = 4
+EXPANSION_DISPLAY = 5
 
 
 def get_kst_now():
@@ -665,7 +669,7 @@ def get_theme_profiles(issue_results):
     return sorted(results, key=lambda x: x["강도"], reverse=True)
 
 
-def get_stock_candidate_rows(theme_profiles, limit=10):
+def get_stock_candidate_rows(theme_profiles, limit=10, include_market_data=False):
     stock_counter = Counter()
     stock_themes = {}
 
@@ -680,23 +684,31 @@ def get_stock_candidate_rows(theme_profiles, limit=10):
     rows = []
 
     for stock, score in stock_counter.most_common(limit):
-        snapshot = get_stock_market_snapshot(stock)
-        total_score = score + snapshot["chart_score"]
-
-        rows.append({
+        row = {
             "종목": stock,
             "연결테마": ", ".join(stock_themes[stock][:3]),
             "뉴스연결점수": score,
+        }
+
+        if not include_market_data:
+            rows.append(row)
+            continue
+
+        snapshot = get_stock_market_snapshot(stock)
+
+        row.update({
             "현재가": snapshot["price"],
             "거래대금": snapshot["trade_value"],
             "거래대금비": snapshot["trade_ratio"],
             "차트위치": snapshot["ma_status"],
             "눌림률": snapshot["pullback"],
-            "확인점수": total_score,
+            "확인점수": score + snapshot["chart_score"],
             "네이버차트": snapshot["naver_url"],
         })
+        rows.append(row)
 
-    return sorted(rows, key=lambda x: x["확인점수"], reverse=True)
+    sort_key = "확인점수" if include_market_data else "뉴스연결점수"
+    return sorted(rows, key=lambda x: x[sort_key], reverse=True)
 
 
 def get_risk_alerts(issue_results):
@@ -1035,6 +1047,45 @@ def get_naver_news(query="경제", display=20, require_market=True):
         return []
 
 
+@st.cache_data(ttl=60 * 10)
+def get_rss_news(url):
+    results = []
+
+    try:
+        feed = feedparser.parse(
+            url,
+            request_headers={"User-Agent": "Mozilla/5.0"}
+        )
+
+        for entry in feed.entries[:RSS_ENTRY_LIMIT]:
+            title = clean_title(entry.title)
+
+            if len(title) < 8:
+                continue
+
+            terms = extract_terms(title)
+
+            if len(terms) < 2:
+                continue
+
+            if not is_market_relevant_news(title, terms):
+                continue
+
+            results.append({
+                "title": title,
+                "link": entry.link,
+                "terms": terms,
+                "term_set": set(terms),
+                "source": url,
+                "source_score": get_source_score(url)
+            })
+
+    except Exception:
+        return []
+
+    return results
+
+
 def make_connection_guide(issue, keywords):
     text = issue.lower() + " " + " ".join(keywords).lower()
 
@@ -1101,42 +1152,12 @@ news_data = []
 seen_titles = set()
 
 for url in rss_urls:
-    try:
-        feed = feedparser.parse(
-            url,
-            request_headers={"User-Agent": "Mozilla/5.0"}
-        )
+    for news in get_rss_news(url):
+        if news["title"] in seen_titles:
+            continue
 
-        for entry in feed.entries[:30]:
-            title = clean_title(entry.title)
-
-            if len(title) < 8:
-                continue
-
-            if title in seen_titles:
-                continue
-
-            terms = extract_terms(title)
-
-            if len(terms) < 2:
-                continue
-
-            if not is_market_relevant_news(title, terms):
-                continue
-
-            seen_titles.add(title)
-
-            news_data.append({
-                "title": title,
-                "link": entry.link,
-                "terms": terms,
-                "term_set": set(terms),
-                "source": url,
-                "source_score": get_source_score(url)
-            })
-
-    except Exception:
-        pass
+        seen_titles.add(news["title"])
+        news_data.append(news)
 
 
 naver_queries = [
@@ -1145,7 +1166,7 @@ naver_queries = [
 ]
 
 for query in naver_queries:
-    for news in get_naver_news(query, display=20):
+    for news in get_naver_news(query, display=NAVER_BASE_DISPLAY):
         if news["title"] in seen_titles:
             continue
 
@@ -1169,10 +1190,10 @@ for news in news_data:
 expansion_queries = [
     term for term, count in seed_counter.most_common(8)
     if count >= 2 and term not in naver_queries
-]
+][:EXPANSION_QUERY_LIMIT]
 
 for query in expansion_queries:
-    for news in get_naver_news(query, display=8):
+    for news in get_naver_news(query, display=EXPANSION_DISPLAY):
         if news["title"] in seen_titles:
             continue
 
@@ -1290,7 +1311,15 @@ top_keywords = sorted(
 )[:7]
 
 theme_profiles = get_theme_profiles(issue_results)
-stock_candidate_rows = get_stock_candidate_rows(theme_profiles)
+load_market_data = st.checkbox(
+    "관련 종목 가격·차트 데이터 불러오기",
+    value=False,
+    help="켜면 pykrx로 현재가, 거래대금, 이동평균 위치를 가져옵니다. 첫 로딩은 조금 느릴 수 있습니다."
+)
+stock_candidate_rows = get_stock_candidate_rows(
+    theme_profiles,
+    include_market_data=load_market_data
+)
 
 
 # =========================
@@ -1359,18 +1388,26 @@ else:
 st.subheader("🎯 관련 종목 후보 압축")
 
 if stock_candidate_rows:
+    stock_table = pd.DataFrame(stock_candidate_rows)
+    column_config = {}
+
+    if load_market_data and "네이버차트" in stock_table.columns:
+        column_config["네이버차트"] = st.column_config.LinkColumn(
+            "네이버차트",
+            display_text="차트 보기"
+        )
+
     st.dataframe(
-        pd.DataFrame(stock_candidate_rows),
+        stock_table,
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "네이버차트": st.column_config.LinkColumn(
-                "네이버차트",
-                display_text="차트 보기"
-            )
-        },
+        column_config=column_config,
     )
-    st.caption("확인점수는 뉴스 연결점수와 차트/거래대금 보조 점수를 합친 참고 점수입니다.")
+
+    if load_market_data:
+        st.caption("확인점수는 뉴스 연결점수와 차트/거래대금 보조 점수를 합친 참고 점수입니다.")
+    else:
+        st.caption("빠른 로딩을 위해 가격·차트 데이터는 기본으로 불러오지 않습니다.")
 else:
     st.caption("아직 관련 종목 후보를 만들 만큼 뚜렷한 테마가 없습니다.")
 
